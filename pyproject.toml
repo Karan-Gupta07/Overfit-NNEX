@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "semanticcodec"
+version = "0.0.1"
+description = "Lossless photo compression with a small network overfitted to each image (NNEX)"
+readme = "README.md"
+# numpy 2.5's type stubs use 3.12+ syntax, so 3.12 is the real floor.
+requires-python = ">=3.12"
+
+# Base install covers the measurement/experiment path only.
+# ML and rendering backends are optional extras so the experiment venv stays small.
+dependencies = [
+    "numpy==2.5.1",
+    "pillow==12.3.0",
+    "zstandard==0.25.0",
+    "cbor2==6.1.4",
+]
+
+[project.optional-dependencies]
+# Symbol analysis for the SCDX floor.
+cv = [
+    "opencv-python-headless==5.0.0.93",
+]
+# Photo coder training.
+ml = [
+    "torch==2.13.0",
+]
+# Optional runtime for mixed-content JPEG XL residuals and floor.
+hybrid = [
+    "imagecodecs==2026.10.10",
+]
+dev = [
+    "pytest==9.0.1",
+    "hypothesis==6.165.0",
+    "ruff==0.15.3",
+    "mypy==1.19.1",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+
+# Design invariant: core/render/format must stay ML-free and fully typed.
+[[tool.mypy.overrides]]
+module = ["semanticcodec.core.*", "semanticcodec.render.*", "semanticcodec.format.*"]
+strict = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

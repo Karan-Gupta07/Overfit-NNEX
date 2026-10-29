@@ -1,0 +1,861 @@
+{
+  "scope": "Default encoder on the held-out fresh Tecnick cohort, with paq8px -9L",
+  "commit": "a82b98a4c127f9db63d7e21e1e2fac3aef2d7f6a",
+  "manifest_sha256": "0798799cc87b070cf883c651938371b716ce8a2864e4d72fcf83937dcad81aa3",
+  "native_backend_sha256": "cb297d6d785bf951a7c10d337a63f6c80956c6e6e96f7326ce5c647997353a33",
+  "paq8px": {
+    "binary_sha256": "66b1de6706c91444d6d058e8a60d856690955c5b54488ed2813e37d4f8e885f3",
+    "source": "https://github.com/hxim/paq8px commit 553024fcb4a5a4dfa16204d0313fd4ee43e5a8ac (v217), two macOS min() overload casts, clang -mcpu=apple-m1 -O3 -flto",
+    "machine": "arm64",
+    "level": "-9L",
+    "input": "binary PPM (P6) of the exact RGB samples"
+  },
+  "raw_receipts": [
+    {
+      "file": "local-probability-a82b98a-tecnick-fresh-crop512.json",
+      "sha256": "43612d1ee24cc59a33014d1f704d2e949eaba797fac54d2be269e4093979b214"
+    },
+    {
+      "file": "local-probability-a82b98a-tecnick-fresh-2400.json",
+      "sha256": "153578cb5563a1ad7c2d60840179bf26fd133433bc5e621e77b22f3ee86ab6d9"
+    },
+    {
+      "file": "paq8px-tecnick-fresh-2400-compress-0.json",
+      "sha256": "1882b80872731d23b609cf9f2b518aceafdeb623207d8dc768565bca0b4b8ba7"
+    },
+    {
+      "file": "paq8px-tecnick-fresh-2400-compress-1.json",
+      "sha256": "315d138346b3b432b6d88ff49ae3c9b2591cd55fd321658eccf50104ac5a75b8"
+    },
+    {
+      "file": "paq8px-tecnick-fresh-2400-compress-2.json",
+      "sha256": "fec15546b7aac1c78f51edc3de27470c371d133800f32d0dfb699ed15b9493fe"
+    },
+    {
+      "file": "paq8px-tecnick-fresh-2400-compress-3.json",
+      "sha256": "b2cadafe8556fb08a1ce12add75e012f828ddee0fff23cdd857b0e2fd919b437"
+    },
+    {
+      "file": "paq8px-tecnick-fresh-2400-verify-0.json",
+      "sha256": "24caecbc8b9e808659960d080552555783bdd849830d28c0a2f96db2315ab312"
+    },
+    {
+      "file": "paq8px-tecnick-fresh-2400-verify-1.json",
+      "sha256": "20cdb63b94f39b11f319286611d3acbd8e38469873921f28ded42fcdfce78b8c"
+    },
+    {
+      "file": "paq8px-tecnick-fresh-2400-verify-2.json",
+      "sha256": "9d972f549b31748a0815d581e49816368e8595373596a0f9c244f3928dbbabaa"
+    },
+    {
+      "file": "paq8px-tecnick-fresh-2400-verify-3.json",
+      "sha256": "b7c71eb4d9786d577744a86b6e5c3c526592ce38319987c335f2c105d9d980ad"
+    },
+    {
+      "file": "paq8px-tecnick-fresh-crop512-compress-0.json",
+      "sha256": "b67652954fe45461c639d5c71cf91e1dd81c26084b09dd2469e047a9bd67cffd"
+    },
+    {
+      "file": "paq8px-tecnick-fresh-crop512-compress-8.json",
+      "sha256": "8b1c3435cc2d95ec1ccee7039b7d1d07d72a53bfa426b5df46328a48ba765603"
+    },
+    {
+      "file": "paq8px-tecnick-fresh-crop512-verify-0.json",
+      "sha256": "dd5f571fb0a644c62bb65d2c028bd036262bb267fffe36ed659bd1183fdbe6a7"
+    },
+    {
+      "file": "paq8px-tecnick-fresh-crop512-verify-8.json",
+      "sha256": "724b9492d474711698c29bfa052ca6ad1f24d1e202ddf261a33a9d4d06efc099"
+    },
+    {
+      "file": "neural-cross-isa-a82b98a-tecnick-fresh.json",
+      "sha256": "6a8b765304b24e6746e57bc7e80d50850812586a63988530003ee25560b2a5df"
+    }
+  ],
+  "cohorts": {
+    "tecnick-fresh-crop512": {
+      "summary": {
+        "images": 16,
+        "complete_file_bytes": 1536577,
+        "codec_bytes": {
+          "png": 3738879,
+          "webp-lossless": 2733334,
+          "jxl-lossless-e9": 2147237,
+          "jxl-lossless-e10": 2140363
+        },
+        "saving_vs_codec_percent": {
+          "png": 58.903,
+          "webp-lossless": 43.784,
+          "jxl-lossless-e9": 28.439,
+          "jxl-lossless-e10": 28.21
+        },
+        "best_baseline_bytes": 2140363,
+        "saving_vs_best_baseline_percent": 28.21,
+        "median_saving_vs_best_baseline_percent": 27.54,
+        "min_saving_vs_best_baseline_percent": 22.759,
+        "max_saving_vs_best_baseline_percent": 34.244,
+        "wins_vs_best_baseline": 16,
+        "bits_per_sample": 0.9769,
+        "best_baseline_bits_per_sample": 1.3608,
+        "paq8px_bytes": 1539595,
+        "paq8px_bits_per_sample": 0.9788,
+        "saving_vs_paq8px_percent": 0.196,
+        "median_saving_vs_paq8px_percent": 0.613,
+        "min_saving_vs_paq8px_percent": -5.518,
+        "max_saving_vs_paq8px_percent": 3.363,
+        "smaller_than_paq8px": 10,
+        "all_exact": true,
+        "median_encode_seconds": 10.34,
+        "median_decode_seconds": 0.21,
+        "median_paq8px_compress_seconds": 504.4,
+        "median_paq8px_decompress_seconds": 478.0
+      },
+      "images": [
+        {
+          "image": "baloons.png",
+          "complete_file_bytes": 79588,
+          "file_sha256": "204cc1aae6bd7a9be1377b50b8387dff850f390748fcc37f1938d8287a81bd0c",
+          "format": "nnex-v4",
+          "hidden": 12,
+          "model_bytes": 4012,
+          "exact_rgba": true,
+          "samples": 786432,
+          "baselines": {
+            "png": 195266,
+            "webp-lossless": 149092,
+            "jxl-lossless-e9": 109285,
+            "jxl-lossless-e10": 108978
+          },
+          "best_baseline": "jxl-lossless-e10",
+          "saving_vs_best_baseline_percent": 26.969,
+          "bits_per_sample": 0.8096,
+          "best_baseline_bits_per_sample": 1.1086,
+          "encode_seconds": 10.68,
+          "decode_seconds": 0.185,
+          "phase_seconds": {
+            "local-fit": 0.12,
+            "floor": 2.19,
+            "train-h12-f4": 9.44,
+            "precision-h12-f4": 0.07,
+            "train-h32-f4": 2.6,
+            "final-check": 0.17
+          },
+          "paq8px_bytes": 77733,
+          "paq8px_archive_sha256": "4155d20577261ba6db86febf392817cef1b5363a12051f16d3310c4fe05ff4e9",
+          "saving_vs_paq8px_percent": -2.386,
+          "paq8px_compress_seconds": 568.2,
+          "paq8px_decompress_seconds": 900.4
+        },
+        {
+          "image": "billiard_balls_b.png",
+          "complete_file_bytes": 70715,
+          "file_sha256": "099dd659dc434bcb47e02d4441bf5ba64bd6c2a3f8ffafc3e39aeae0148f8c6d",
+          "format": "nnex-v4",
+          "hidden": 32,
+          "model_bytes": 9682,
+          "exact_rgba": true,
+          "samples": 786432,
+          "baselines": {
+            "png": 193087,
+            "webp-lossless": 136534,
+            "jxl-lossless-e9": 106953,
+            "jxl-lossless-e10": 106456
+          },
+          "best_baseline": "jxl-lossless-e10",
+          "saving_vs_best_baseline_percent": 33.573,
+          "bits_per_sample": 0.7194,
+          "best_baseline_bits_per_sample": 1.0829,
+          "encode_seconds": 16.12,
+          "decode_seconds": 0.212,
+          "phase_seconds": {
+            "local-fit": 0.11,
+            "floor": 1.85,
+            "train-h12-f4": 2.67,
+            "train-h32-f4": 15.23,
+            "precision-h32-f4": 0.1,
+            "final-check": 0.21
+          },
+          "paq8px_bytes": 67017,
+          "paq8px_archive_sha256": "0cec4ad749a047d0d196e85430ed15fe6326e8378a81bc9ce2e71dbd93b1346b",
+          "saving_vs_paq8px_percent": -5.518,
+          "paq8px_compress_seconds": 402.6,
+          "paq8px_decompress_seconds": 692.2
+        },
+        {
+          "image": "cards_b.png",
+          "complete_file_bytes": 113320,
+          "file_sha256": "030da7103d18a7b682474d5f0ae428fd1c9285fa75615462ac8c5ca41024d050",
+          "format": "nnex-v4",
+          "hidden": 12,
+          "model_bytes": 4086,
+          "exact_rgba": true,
+          "samples": 786432,
+          "baselines": {
+            "png": 290262,
+            "webp-lossless": 201512,
+            "jxl-lossless-e9": 158031,
+            "jxl-lossless-e10": 157633
+          },
+          "best_baseline": "jxl-lossless-e10",
+          "saving_vs_best_baseline_percent": 28.111,
+          "bits_per_sample": 1.1528,
+          "best_baseline_bits_per_sample": 1.6035,
+          "encode_seconds": 10.36,
+          "decode_seconds": 0.191,
+          "phase_seconds": {
+            "local-fit": 0.12,
+            "floor": 1.87,
+            "train-h12-f4": 9.52,
+            "precision-h12-f4": 0.08,
+            "train-h32-f4": 2.63,
+            "final-check": 0.19
+          },
+          "paq8px_bytes": 116509,
+          "paq8px_archive_sha256": "e913c26d02fbcd547adda4e45c84668f9fa3d5cae2edafc7e65d522fdb51fb67",
+          "saving_vs_paq8px_percent": 2.737,
+          "paq8px_compress_seconds": 506.7,
+          "paq8px_decompress_seconds": 651.5
+        },
+        {
+          "image": "clips.png",
+          "complete_file_bytes": 114973,
+          "file_sha256": "88d8737da35b22cd11eff2349d108c60066abedfd56c70db4516a184d9e44979",
+          "format": "nnex-v4",
+          "hidden": 12,
+          "model_bytes": 4433,
+          "exact_rgba": true,
+          "samples": 786432,
+          "baselines": {
+            "png": 315860,
+            "webp-lossless": 212152,
+            "jxl-lossless-e9": 170447,
+            "jxl-lossless-e10": 169984
+          },
+          "best_baseline": "jxl-lossless-e10",
+          "saving_vs_best_baseline_percent": 32.362,
+          "bits_per_sample": 1.1696,
+          "best_baseline_bits_per_sample": 1.7292,
+          "encode_seconds": 10.25,
+          "decode_seconds": 0.202,
+          "phase_seconds": {
+            "local-fit": 0.11,
+            "floor": 2.01,
+            "train-h12-f4": 9.42,
+            "precision-h12-f4": 0.08,
+            "train-h32-f4": 2.55,
+            "final-check": 0.21
+          },
+          "paq8px_bytes": 116074,
+          "paq8px_archive_sha256": "8c1c2433cbd5e76d1f9a5c6a08b3bbc1e4aac3064c2da41ff987b24e64f45c9f",
+          "saving_vs_paq8px_percent": 0.949,
+          "paq8px_compress_seconds": 360.9,
+          "paq8px_decompress_seconds": 315.5
+        },
+        {
+          "image": "ducks.png",
+          "complete_file_bytes": 86993,
+          "file_sha256": "c3712a5ec97ebd58e3f48e0adc69d69f252b1206e27ef9429e2e405ecb72b088",
+          "format": "nnex-v4",
+          "hidden": 12,
+          "model_bytes": 3580,
+          "exact_rgba": true,
+          "samples": 786432,
+          "baselines": {
+            "png": 204521,
+            "webp-lossless": 155436,
+            "jxl-lossless-e9": 112845,
+            "jxl-lossless-e10": 112668
+          },
+          "best_baseline": "jxl-lossless-e10",
+          "saving_vs_best_baseline_percent": 22.788,
+          "bits_per_sample": 0.8849,
+          "best_baseline_bits_per_sample": 1.1461,
+          "encode_seconds": 10.56,
+          "decode_seconds": 0.21,
+          "phase_seconds": {
+            "local-fit": 0.11,
+            "floor": 2.04,
+            "train-h12-f4": 9.6,
+            "precision-h12-f4": 0.08,
+            "train-h32-f4": 2.61,
+            "final-check": 0.32
+          },
+          "paq8px_bytes": 85947,
+          "paq8px_archive_sha256": "e0d651c65f67d7228ee9c9fe608e8b141ce30ca72cd9563730575a0791a1b05f",
+          "saving_vs_paq8px_percent": -1.217,
+          "paq8px_compress_seconds": 487.2,
+          "paq8px_decompress_seconds": 491.2
+        },
+        {
+          "image": "garden_table.png",
+          "complete_file_bytes": 140948,
+          "file_sha256": "5f867f89f39c02316bd2e3effd71aac98c78df0f9cac761036669d4a860884b7",
+          "format": "nnex-v4",
+          "hidden": 12,
+          "model_bytes": 3820,
+          "exact_rgba": true,
+          "samples": 786432,
+          "baselines": {
+            "png": 332107,
+            "webp-lossless": 232616,
+            "jxl-lossless-e9": 183714,
+            "jxl-lossless-e10": 183433
+          },
+          "best_baseline": "jxl-lossless-e10",
+          "saving_vs_best_baseline_percent": 23.161,
+          "bits_per_sample": 1.4338,
+          "best_baseline_bits_per_sample": 1.866,
+          "encode_seconds": 10.32,
+          "decode_seconds": 0.216,
+          "phase_seconds": {
+            "local-fit": 0.12,
+            "floor": 1.57,
+            "train-h12-f4": 9.44,
+            "precision-h12-f4": 0.09,
+            "train-h32-f4": 2.55,
+            "final-check": 0.21
+          },
+          "paq8px_bytes": 142676,
+          "paq8px_archive_sha256": "e58bc8ae92ee954590d3429b594188f846f2b64767ae770cfcbe4bf3e08ce4f2",
+          "saving_vs_paq8px_percent": 1.211,
+          "paq8px_compress_seconds": 647.6,
+          "paq8px_decompress_seconds": 475.5
+        },
+        {
+          "image": "guitar_head.png",
+          "complete_file_bytes": 115185,
+          "file_sha256": "70b21c0758de3d3be65a52b95c62c91008dbca50cf0723f994942f3bf5bdb6af",
+          "format": "nnex-v4",
+          "hidden": 12,
+          "model_bytes": 3824,
+          "exact_rgba": true,
+          "samples": 786432,
+          "baselines": {
+            "png": 250537,
+            "webp-lossless": 192158,
+            "jxl-lossless-e9": 163814,
+            "jxl-lossless-e10": 163557
+          },
+          "best_baseline": "jxl-lossless-e10",
+          "saving_vs_best_baseline_percent": 29.575,
+          "bits_per_sample": 1.1717,
+          "best_baseline_bits_per_sample": 1.6638,
+          "encode_seconds": 10.21,
+          "decode_seconds": 0.265,
+          "phase_seconds": {
+            "local-fit": 0.12,
+            "floor": 1.78,
+            "train-h12-f4": 9.35,
+            "precision-h12-f4": 0.08,
+            "train-h32-f4": 2.56,
+            "final-check": 0.21
+          },
+          "paq8px_bytes": 116684,
+          "paq8px_archive_sha256": "2f132a63e1d9accccccefe1f411ffad915d5f7f807fb124a1242249eae734fe6",
+          "saving_vs_paq8px_percent": 1.285,
+          "paq8px_compress_seconds": 502.1,
+          "paq8px_decompress_seconds": 225.0
+        },
+        {
+          "image": "lion.png",
+          "complete_file_bytes": 88055,
+          "file_sha256": "2a1784c02eb98996ced826997f821a05752e126c2ff1620857fa11759c7cd07d",
+          "format": "nnex-v4",
+          "hidden": 12,
+          "model_bytes": 3544,
+          "exact_rgba": true,
+          "samples": 786432,
+          "baselines": {
+            "png": 264200,
+            "webp-lossless": 186782,
+            "jxl-lossless-e9": 133189,
+            "jxl-lossless-e10": 132928
+          },
+          "best_baseline": "jxl-lossless-e10",
+          "saving_vs_best_baseline_percent": 33.757,
+          "bits_per_sample": 0.8957,
+          "best_baseline_bits_per_sample": 1.3522,
+          "encode_seconds": 10.37,
+          "decode_seconds": 0.259,
+          "phase_seconds": {
+            "local-fit": 0.12,
+            "floor": 1.8,
+            "train-h12-f4": 9.51,
+            "precision-h12-f4": 0.08,
+            "train-h32-f4": 2.57,
+            "final-check": 0.21
+          },
+          "paq8px_bytes": 90820,
+          "paq8px_archive_sha256": "099f21f89cd238ea12cf7a7686f1d00410dfa79e31bb2118ab77bb837350c0fc",
+          "saving_vs_paq8px_percent": 3.044,
+          "paq8px_compress_seconds": 632.7,
+          "paq8px_decompress_seconds": 235.2
+        },
+        {
+          "image": "pencils_b.png",
+          "complete_file_bytes": 87394,
+          "file_sha256": "b1ace7d2ceb8cebc30b268e75e5b15eba1b8a6eaeeae7c73b42be80c14635971",
+          "format": "nnex-v4",
+          "hidden": 12,
+          "model_bytes": 3595,
+          "exact_rgba": true,
+          "samples": 786432,
+          "baselines": {
+            "png": 178670,
+            "webp-lossless": 135380,
+            "jxl-lossless-e9": 115379,
+            "jxl-lossless-e10": 114992
+          },
+          "best_baseline": "jxl-lossless-e10",
+          "saving_vs_best_baseline_percent": 24.0,
+          "bits_per_sample": 0.889,
+          "best_baseline_bits_per_sample": 1.1698,
+          "encode_seconds": 10.33,
+          "decode_seconds": 0.266,
+          "phase_seconds": {
+            "local-fit": 0.12,
+            "floor": 1.88,
+            "train-h12-f4": 9.4,
+            "precision-h12-f4": 0.08,
+            "train-h32-f4": 2.64,
+            "final-check": 0.26
+          },
+          "paq8px_bytes": 84535,
+          "paq8px_archive_sha256": "0bb3ec6257f902025d2e553d656310e8022cf96711950451d110021df1399f69",
+          "saving_vs_paq8px_percent": -3.382,
+          "paq8px_compress_seconds": 564.0,
+          "paq8px_decompress_seconds": 896.4
+        },
+        {
+          "image": "roof.png",
+          "complete_file_bytes": 82526,
+          "file_sha256": "bdf9390b5fe88f438c59d2cadc1a8cc90f28e72772ca920d5ff3353442cd88b6",
+          "format": "nnex-v4",
+          "hidden": 12,
+          "model_bytes": 3513,
+          "exact_rgba": true,
+          "samples": 786432,
+          "baselines": {
+            "png": 197906,
+            "webp-lossless": 156358,
+            "jxl-lossless-e9": 126325,
+            "jxl-lossless-e10": 125504
+          },
+          "best_baseline": "jxl-lossless-e10",
+          "saving_vs_best_baseline_percent": 34.244,
+          "bits_per_sample": 0.8395,
+          "best_baseline_bits_per_sample": 1.2767,
+          "encode_seconds": 10.24,
+          "decode_seconds": 0.209,
+          "phase_seconds": {
+            "local-fit": 0.12,
+            "floor": 1.38,
+            "train-h12-f4": 9.39,
+            "precision-h12-f4": 0.07,
+            "train-h32-f4": 2.49,
+            "final-check": 0.21
+          },
+          "paq8px_bytes": 85398,
+          "paq8px_archive_sha256": "9f2130ab2a1ed2d2a5b25042571cc89bb1c041876a8034a8d0066dc6d395970c",
+          "saving_vs_paq8px_percent": 3.363,
+          "paq8px_compress_seconds": 403.1,
+          "paq8px_decompress_seconds": 705.7
+        },
+        {
+          "image": "snails.png",
+          "complete_file_bytes": 83902,
+          "file_sha256": "c3079599bedd68970f4ae3102d592843df030af7c68d8c7800e7c755e5f29939",
+          "format": "nnex-v4",
+          "hidden": 12,
+          "model_bytes": 3553,
+          "exact_rgba": true,
+          "samples": 786432,
+          "baselines": {
+            "png": 220209,
+            "webp-lossless": 158556,
+            "jxl-lossless-e9": 120651,
+            "jxl-lossless-e10": 120422
+          },
+          "best_baseline": "jxl-lossless-e10",
+          "saving_vs_best_baseline_percent": 30.327,
+          "bits_per_sample": 0.8535,
+          "best_baseline_bits_per_sample": 1.225,
+          "encode_seconds": 10.57,
+          "decode_seconds": 0.209,
+          "phase_seconds": {
+            "local-fit": 0.12,
+            "floor": 2.09,
+            "train-h12-f4": 9.65,
+            "precision-h12-f4": 0.08,
+            "train-h32-f4": 2.87,
+            "final-check": 0.2
+          },
+          "paq8px_bytes": 85055,
+          "paq8px_archive_sha256": "fe96bad61932666194e1fd288e79932f9116c02f6a1711d0bbe61dcc6c962472",
+          "saving_vs_paq8px_percent": 1.356,
+          "paq8px_compress_seconds": 511.1,
+          "paq8px_decompress_seconds": 683.7
+        },
+        {
+          "image": "tomatoes_a.png",
+          "complete_file_bytes": 94266,
+          "file_sha256": "07261d8af614c7770310d6da15aaf8bb6fb652ec9459ffd76a4a39008d9d172b",
+          "format": "nnex-v4",
+          "hidden": 12,
+          "model_bytes": 3607,
+          "exact_rgba": true,
+          "samples": 786432,
+          "baselines": {
+            "png": 204942,
+            "webp-lossless": 161162,
+            "jxl-lossless-e9": 123439,
+            "jxl-lossless-e10": 122597
+          },
+          "best_baseline": "jxl-lossless-e10",
+          "saving_vs_best_baseline_percent": 23.109,
+          "bits_per_sample": 0.9589,
+          "best_baseline_bits_per_sample": 1.2471,
+          "encode_seconds": 10.11,
+          "decode_seconds": 0.203,
+          "phase_seconds": {
+            "local-fit": 0.11,
+            "floor": 2.32,
+            "train-h12-f4": 9.25,
+            "precision-h12-f4": 0.07,
+            "train-h32-f4": 2.58,
+            "final-check": 0.19
+          },
+          "paq8px_bytes": 92100,
+          "paq8px_archive_sha256": "f3481129045af8b6c2ed87d10ed015f5e5c72d20f1acd2de3285a9ecaef54933",
+          "saving_vs_paq8px_percent": -2.352,
+          "paq8px_compress_seconds": 342.1,
+          "paq8px_decompress_seconds": 263.7
+        },
+        {
+          "image": "tomatoes_b.png",
+          "complete_file_bytes": 80082,
+          "file_sha256": "a14e1ad955c9a80e37269083a91614a855621b01cb39b4f538e636acfbc427ac",
+          "format": "nnex-v4",
+          "hidden": 12,
+          "model_bytes": 3808,
+          "exact_rgba": true,
+          "samples": 786432,
+          "baselines": {
+            "png": 189919,
+            "webp-lossless": 130102,
+            "jxl-lossless-e9": 103806,
+            "jxl-lossless-e10": 103678
+          },
+          "best_baseline": "jxl-lossless-e10",
+          "saving_vs_best_baseline_percent": 22.759,
+          "bits_per_sample": 0.8146,
+          "best_baseline_bits_per_sample": 1.0547,
+          "encode_seconds": 10.19,
+          "decode_seconds": 0.2,
+          "phase_seconds": {
+            "local-fit": 0.11,
+            "floor": 1.98,
+            "train-h12-f4": 9.33,
+            "precision-h12-f4": 0.08,
+            "train-h32-f4": 2.5,
+            "final-check": 0.2
+          },
+          "paq8px_bytes": 78591,
+          "paq8px_archive_sha256": "e55a2698c7133f1d2384b3a884b16a887b4aeac917b328adeea9ca13717ba559",
+          "saving_vs_paq8px_percent": -1.897,
+          "paq8px_compress_seconds": 465.5,
+          "paq8px_decompress_seconds": 480.5
+        },
+        {
+          "image": "tools_a.png",
+          "complete_file_bytes": 112430,
+          "file_sha256": "ae7ad168c808a15619f8c8c93d62022f8ef6eb9240ee4c8f7d5027069f8b5689",
+          "format": "nnex-v4",
+          "hidden": 12,
+          "model_bytes": 3754,
+          "exact_rgba": true,
+          "samples": 786432,
+          "baselines": {
+            "png": 239332,
+            "webp-lossless": 183378,
+            "jxl-lossless-e9": 153869,
+            "jxl-lossless-e10": 153202
+          },
+          "best_baseline": "jxl-lossless-e10",
+          "saving_vs_best_baseline_percent": 26.613,
+          "bits_per_sample": 1.1437,
+          "best_baseline_bits_per_sample": 1.5585,
+          "encode_seconds": 10.35,
+          "decode_seconds": 0.212,
+          "phase_seconds": {
+            "local-fit": 0.13,
+            "floor": 1.82,
+            "train-h12-f4": 9.49,
+            "precision-h12-f4": 0.08,
+            "train-h32-f4": 2.61,
+            "final-check": 0.21
+          },
+          "paq8px_bytes": 112743,
+          "paq8px_archive_sha256": "ffb167ecd709e87b45a89662c80b194711fb9d60cbb5948f4704cab6df9e5267",
+          "saving_vs_paq8px_percent": 0.278,
+          "paq8px_compress_seconds": 652.3,
+          "paq8px_decompress_seconds": 452.2
+        },
+        {
+          "image": "tools_b.png",
+          "complete_file_bytes": 104832,
+          "file_sha256": "107e392f3afa20a7b07ca3dbb113e2ecdf562085d04c86c3edf71b3a5dbbe0bb",
+          "format": "nnex-v4",
+          "hidden": 12,
+          "model_bytes": 4174,
+          "exact_rgba": true,
+          "samples": 786432,
+          "baselines": {
+            "png": 244115,
+            "webp-lossless": 183812,
+            "jxl-lossless-e9": 142542,
+            "jxl-lossless-e10": 142012
+          },
+          "best_baseline": "jxl-lossless-e10",
+          "saving_vs_best_baseline_percent": 26.181,
+          "bits_per_sample": 1.0664,
+          "best_baseline_bits_per_sample": 1.4446,
+          "encode_seconds": 10.38,
+          "decode_seconds": 0.203,
+          "phase_seconds": {
+            "local-fit": 0.12,
+            "floor": 2.02,
+            "train-h12-f4": 9.51,
+            "precision-h12-f4": 0.08,
+            "train-h32-f4": 2.59,
+            "final-check": 0.2
+          },
+          "paq8px_bytes": 104968,
+          "paq8px_archive_sha256": "5eecc648f7ba7c5c819c0decb2c728e2d5941097e45d2a9dcc94500383f5a643",
+          "saving_vs_paq8px_percent": 0.13,
+          "paq8px_compress_seconds": 499.2,
+          "paq8px_decompress_seconds": 304.9
+        },
+        {
+          "image": "wood_game.png",
+          "complete_file_bytes": 81368,
+          "file_sha256": "093570f16f7b4c1dc9965105f13c956e5f8e18f4afb769c86be8ce6b85ce06da",
+          "format": "nnex-v4",
+          "hidden": 12,
+          "model_bytes": 3362,
+          "exact_rgba": true,
+          "samples": 786432,
+          "baselines": {
+            "png": 217946,
+            "webp-lossless": 158304,
+            "jxl-lossless-e9": 122948,
+            "jxl-lossless-e10": 122319
+          },
+          "best_baseline": "jxl-lossless-e10",
+          "saving_vs_best_baseline_percent": 33.479,
+          "bits_per_sample": 0.8277,
+          "best_baseline_bits_per_sample": 1.2443,
+          "encode_seconds": 10.34,
+          "decode_seconds": 0.214,
+          "phase_seconds": {
+            "local-fit": 0.12,
+            "floor": 2.05,
+            "train-h12-f4": 9.49,
+            "precision-h12-f4": 0.07,
+            "train-h32-f4": 2.62,
+            "final-check": 0.2
+          },
+          "paq8px_bytes": 82745,
+          "paq8px_archive_sha256": "9570ef945bfcf4ae1084505c6e2fc839b17dc2a6caa9c4ae53735a8ac95c2f89",
+          "saving_vs_paq8px_percent": 1.664,
+          "paq8px_compress_seconds": 608.0,
+          "paq8px_decompress_seconds": 220.2
+        }
+      ]
+    },
+    "tecnick-fresh-2400": {
+      "summary": {
+        "images": 4,
+        "complete_file_bytes": 6415895,
+        "codec_bytes": {
+          "png": 15427276,
+          "webp-lossless": 11848508,
+          "jxl-lossless-e9": 8905825,
+          "jxl-lossless-e10": 8346560
+        },
+        "saving_vs_codec_percent": {
+          "png": 58.412,
+          "webp-lossless": 45.851,
+          "jxl-lossless-e9": 27.958,
+          "jxl-lossless-e10": 23.131
+        },
+        "best_baseline_bytes": 8346560,
+        "saving_vs_best_baseline_percent": 23.131,
+        "median_saving_vs_best_baseline_percent": 23.814,
+        "min_saving_vs_best_baseline_percent": 19.501,
+        "max_saving_vs_best_baseline_percent": 25.034,
+        "wins_vs_best_baseline": 4,
+        "bits_per_sample": 0.7426,
+        "best_baseline_bits_per_sample": 0.966,
+        "paq8px_bytes": 6518112,
+        "paq8px_bits_per_sample": 0.7544,
+        "saving_vs_paq8px_percent": 1.568,
+        "median_saving_vs_paq8px_percent": 1.519,
+        "min_saving_vs_paq8px_percent": 0.606,
+        "max_saving_vs_paq8px_percent": 2.642,
+        "smaller_than_paq8px": 4,
+        "all_exact": true,
+        "median_encode_seconds": 51.34,
+        "median_decode_seconds": 5.14,
+        "median_paq8px_compress_seconds": 9791.1,
+        "median_paq8px_decompress_seconds": 7887.9
+      },
+      "images": [
+        {
+          "image": "baloons.png",
+          "complete_file_bytes": 1635228,
+          "file_sha256": "737fb4731fe4e8f53f198571918fc993803fb612623a581aa37de2888a8fd9b2",
+          "format": "nnex-v4",
+          "hidden": 48,
+          "model_bytes": 21878,
+          "exact_rgba": true,
+          "samples": 17280000,
+          "baselines": {
+            "png": 4211694,
+            "webp-lossless": 3032220,
+            "jxl-lossless-e9": 2356620,
+            "jxl-lossless-e10": 2181287
+          },
+          "best_baseline": "jxl-lossless-e10",
+          "saving_vs_best_baseline_percent": 25.034,
+          "bits_per_sample": 0.7571,
+          "best_baseline_bits_per_sample": 1.0099,
+          "encode_seconds": 50.86,
+          "decode_seconds": 4.985,
+          "phase_seconds": {
+            "local-fit": 2.07,
+            "floor": 14.6,
+            "train-h48-f4": 42.3,
+            "precision-h48-f4": 2.06,
+            "final-check": 5.01
+          },
+          "paq8px_bytes": 1656058,
+          "paq8px_archive_sha256": "c63e964c84ae1eb01bf2a368b2c7701f5d5ee0ee379b52054cbee7a30bae7f36",
+          "saving_vs_paq8px_percent": 1.258,
+          "paq8px_compress_seconds": 9548.4,
+          "paq8px_decompress_seconds": 8040.5
+        },
+        {
+          "image": "ducks.png",
+          "complete_file_bytes": 1558035,
+          "file_sha256": "8b1dc53464a9045d442ed9171fcb08bdb919cf4d6913d3821b186b3c68c59515",
+          "format": "nnex-v4",
+          "hidden": 48,
+          "model_bytes": 19265,
+          "exact_rgba": true,
+          "samples": 17280000,
+          "baselines": {
+            "png": 3814195,
+            "webp-lossless": 3140678,
+            "jxl-lossless-e9": 2054385,
+            "jxl-lossless-e10": 1935470
+          },
+          "best_baseline": "jxl-lossless-e10",
+          "saving_vs_best_baseline_percent": 19.501,
+          "bits_per_sample": 0.7213,
+          "best_baseline_bits_per_sample": 0.8961,
+          "encode_seconds": 49.57,
+          "decode_seconds": 4.976,
+          "phase_seconds": {
+            "local-fit": 1.98,
+            "floor": 12.09,
+            "train-h48-f4": 41.56,
+            "precision-h48-f4": 2.08,
+            "final-check": 4.95
+          },
+          "paq8px_bytes": 1586294,
+          "paq8px_archive_sha256": "f94b29fcc286049bab7e3e02f4d82fef10fe778c5e14cb2a4723b1e07b62e982",
+          "saving_vs_paq8px_percent": 1.781,
+          "paq8px_compress_seconds": 9671.1,
+          "paq8px_decompress_seconds": 7988.0
+        },
+        {
+          "image": "pencils_b.png",
+          "complete_file_bytes": 1631489,
+          "file_sha256": "02190aa25b2d90d0784d21421b3f58630028a9a176c5e783986deb31dc6ce973",
+          "format": "nnex-v4",
+          "hidden": 48,
+          "model_bytes": 21774,
+          "exact_rgba": true,
+          "samples": 17280000,
+          "baselines": {
+            "png": 3445105,
+            "webp-lossless": 2773022,
+            "jxl-lossless-e9": 2245296,
+            "jxl-lossless-e10": 2131639
+          },
+          "best_baseline": "jxl-lossless-e10",
+          "saving_vs_best_baseline_percent": 23.463,
+          "bits_per_sample": 0.7553,
+          "best_baseline_bits_per_sample": 0.9869,
+          "encode_seconds": 52.54,
+          "decode_seconds": 5.579,
+          "phase_seconds": {
+            "local-fit": 2.03,
+            "floor": 15.46,
+            "train-h48-f4": 43.47,
+            "precision-h48-f4": 2.34,
+            "final-check": 5.61
+          },
+          "paq8px_bytes": 1641432,
+          "paq8px_archive_sha256": "3a61d3b73f64b4c1bcc5753f41a36c1cb634c43c8da6806d37469ba90187d45c",
+          "saving_vs_paq8px_percent": 0.606,
+          "paq8px_compress_seconds": 10110.0,
+          "paq8px_decompress_seconds": 7711.8
+        },
+        {
+          "image": "tomatoes_b.png",
+          "complete_file_bytes": 1591143,
+          "file_sha256": "b62ac7d7d5184efdf4236584498c6eda2a8a8062195f0371a2281600a22a533f",
+          "format": "nnex-v4",
+          "hidden": 48,
+          "model_bytes": 19651,
+          "exact_rgba": true,
+          "samples": 17280000,
+          "baselines": {
+            "png": 3956282,
+            "webp-lossless": 2902588,
+            "jxl-lossless-e9": 2249524,
+            "jxl-lossless-e10": 2098164
+          },
+          "best_baseline": "jxl-lossless-e10",
+          "saving_vs_best_baseline_percent": 24.165,
+          "bits_per_sample": 0.7366,
+          "best_baseline_bits_per_sample": 0.9714,
+          "encode_seconds": 51.82,
+          "decode_seconds": 5.287,
+          "phase_seconds": {
+            "local-fit": 2.09,
+            "floor": 18.44,
+            "train-h48-f4": 43.29,
+            "precision-h48-f4": 2.12,
+            "final-check": 5.41
+          },
+          "paq8px_bytes": 1634328,
+          "paq8px_archive_sha256": "3c511b9507b62aa9685e4d8e665403d9a2e3ce6f371c80d6df7a6a1322f46f98",
+          "saving_vs_paq8px_percent": 2.642,
+          "paq8px_compress_seconds": 9911.1,
+          "paq8px_decompress_seconds": 7787.8
+        }
+      ]
+    }
+  },
+  "timing_note": "One M4 Pro laptop (12 cores). Our encoder ran one image at a time, after the paq8px runs finished; paq8px ran several single-threaded processes concurrently",
+  "cross_isa": {
+    "files_checked": 20,
+    "all_exact_and_identical": true,
+    "native_architecture": "arm64",
+    "alternate_backend_sha256": "9b37c9f80e0d3f7f88eadc22805bfe698dce0a35daa869ed6a3e260ac1637568",
+    "note": "Two executable builds on one host, not independent physical machines."
+  }
+}

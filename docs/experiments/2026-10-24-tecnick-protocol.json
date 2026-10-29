@@ -1,0 +1,59 @@
+{
+  "scope": "Frozen before measuring any Tecnick image with any codec. This file records a protocol, not results.",
+  "corpus": "TESTIMAGES (Asuni and Giachetti) SAMPLING 8BIT RGB 2400x2400 C00C00, 40 published images",
+  "source": "https://sourceforge.net/projects/testimages/files/SAMPLING/8BIT/RGB/SAMPLING_8BIT_RGB_2400x2400.tar.bz2/download",
+  "license": "CC BY-NC-SA 4.0; used for research measurement only, images are not redistributed",
+  "archive_sha256": "987e6a5208206b51bb556e808ea052aa588f373124bd0f571888a4754c6afa89",
+  "cohorts": {
+    "tecnick-crop512": "Sorted file-name positions 1,4,...,34 (12 images), one centered 512x512 crop each, exact samples",
+    "tecnick-2400": "Sorted file-name positions 0,3,...,33 (12 images), native 2400x2400 publisher PNG bytes unchanged"
+  },
+  "selection": "Fixed by fetch_tecnick.py from sorted names only, before any compression measurement. The other 16 images stay unused. No result-based exclusions.",
+  "prior_known_inputs": "All 24 Kodak images; all 14 SIPI miscellaneous color images; SIPI aerials 2.1.01-2.1.12, 2.2.01, and wash-ir. Settings were tuned only on those. No Tecnick image was opened by any codec before this protocol.",
+  "encoder": "scripts/research/local_probability/compress.py",
+  "native_backend": "nnproto_integer.cpp built -O3 -std=c++17 for arm64; x86_64 build under Rosetta for the alternate-ISA check",
+  "floor": {
+    "format": "complete wrapped SCDX",
+    "profile": "balanced",
+    "hybrid": true,
+    "partition_depth": 0
+  },
+  "learned": {
+    "hidden_widths": [16, 24],
+    "hidden_layers": 2,
+    "feature_sets": [1],
+    "mixtures": 4,
+    "causal_context": true,
+    "epochs": 400,
+    "batch": 8192,
+    "learning_rate": 0.015,
+    "schedule": "cosine",
+    "schedule_note": "5% linear warmup, cosine decay to a 1% floor",
+    "training": "grouped",
+    "training_note": "Grouped trains the three planes in one batched step with independent weights, optimizer state, and per-plane gradient clipping at 10.",
+    "seed": 20261023,
+    "cpu_threads": 4,
+    "device": "auto (MPS on this machine)",
+    "train_pixel_limit": 1048576,
+    "training_tiles": "Above the limit, evenly spread 256x256 tiles with 6-pixel causal margins; every pixel is still coded",
+    "weight_precision_candidates": [16, 12, 10, 8, 7, 6],
+    "precision_search": "Encode in that order and stop after the first candidate larger than its predecessor",
+    "format": "self-contained integer NNEX v3 with entropy-coded exact binary16 weights and SHA-256 raw RGB checksum"
+  },
+  "prior_round_reference": {
+    "cohorts": ["tecnick-crop512"],
+    "hidden_widths": [16, 32],
+    "feature_sets": [0],
+    "mixtures": 3,
+    "epochs": 200,
+    "learning_rate": 0.001,
+    "schedule": "constant",
+    "training": "sequential",
+    "note": "The previous frozen aerial settings, retrained here without the SCDX floor. Written as NNEX v3, so this delta excludes the separately measured v2-to-v3 model-coding saving. The previous round could not train above 1,048,576 pixels, so for tecnick-2400 its result would have been the SCDX floor."
+  },
+  "selection_rule": "Encode the floor and every learned candidate, verify each independently, choose the smallest complete file. Keep the floor on ties.",
+  "baselines": "Exact RGB PNG (Pillow optimize), WebP lossless cwebp 1.6.0 -lossless -z 9 -exact, JPEG XL lossless effort 9 and effort 10 via imagecodecs libjxl 0.12.0 with one thread; verify every round-trip",
+  "reporting": "All 24 images, per cohort and combined: per-image and aggregate complete-file bytes including transmitted models and headers, median per-image saving against the smallest baseline, win count, exact RGBA verification, hashes, encode and decode seconds. Alternate-ISA decode and byte-identical re-encode of every selected NNEX file. No tuning during or after these cohorts; any rerun is a regression, not fresh validation.",
+  "execution": "Up to three concurrent workers on one Mac; runtimes are not isolated latency.",
+  "limitations": "One publisher's studio photographs; crops are not native full frames. Not a comparison against every codec (for example closed context-mixing image compressors). Production defaults remain unchanged."
+}

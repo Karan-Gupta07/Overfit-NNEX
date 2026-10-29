@@ -1,0 +1,403 @@
+{
+  "scope": "Development only. Six known images (SIPI aerials 2.1.01, 2.1.05, 2.1.09; Kodak 01; SIPI 4.2.03, 4.1.05). Every number is an actual complete NNEX file that decoded exactly; none of these images is validation evidence.",
+  "configs": {
+    "base (previous round: h16 k3 constant lr .001 e200, NNEX v2)": {
+      "per_image_bytes": {
+        "2.1.01.png": 470030,
+        "2.1.05.png": 426078,
+        "2.1.09.png": 412684,
+        "kodim01.png": 437369,
+        "4.2.03.png": 541605,
+        "4.1.05.png": 95960
+      },
+      "total_bytes": 2383726,
+      "vs_previous_round_percent": 0.0,
+      "seconds": 834
+    },
+    "cos3 (cosine lr .003)": {
+      "per_image_bytes": {
+        "2.1.01.png": 469828,
+        "2.1.05.png": 426252,
+        "2.1.09.png": 412138,
+        "kodim01.png": 434843,
+        "4.2.03.png": 541263,
+        "4.1.05.png": 95737
+      },
+      "total_bytes": 2380061,
+      "vs_previous_round_percent": -0.15,
+      "seconds": 836
+    },
+    "cos3-k4 (4 mixtures)": {
+      "per_image_bytes": {
+        "2.1.01.png": 469867,
+        "2.1.05.png": 425665,
+        "2.1.09.png": 412933,
+        "kodim01.png": 430334,
+        "4.2.03.png": 540441,
+        "4.1.05.png": 95720
+      },
+      "total_bytes": 2374960,
+      "vs_previous_round_percent": -0.37,
+      "seconds": 1105
+    },
+    "cos3-h24": {
+      "per_image_bytes": {
+        "2.1.01.png": 471267,
+        "2.1.05.png": 426910,
+        "2.1.09.png": 414336,
+        "kodim01.png": 428934,
+        "4.2.03.png": 541155,
+        "4.1.05.png": 97508
+      },
+      "total_bytes": 2380110,
+      "vs_previous_round_percent": -0.15,
+      "seconds": 1107
+    },
+    "cos3-h12": {
+      "per_image_bytes": {
+        "2.1.01.png": 470274,
+        "2.1.05.png": 426342,
+        "2.1.09.png": 412032,
+        "kodim01.png": 436324,
+        "4.2.03.png": 542451,
+        "4.1.05.png": 94858
+      },
+      "total_bytes": 2382281,
+      "vs_previous_round_percent": -0.06,
+      "seconds": 1105
+    },
+    "k4 v3 (fs0)": {
+      "per_image_bytes": {
+        "2.1.01.png": 468470,
+        "2.1.05.png": 424225,
+        "2.1.09.png": 411496,
+        "kodim01.png": 428866,
+        "4.2.03.png": 538960,
+        "4.1.05.png": 93862
+      },
+      "total_bytes": 2365879,
+      "vs_previous_round_percent": -0.75,
+      "seconds": 527
+    },
+    "far-k4 v3 (fs1)": {
+      "per_image_bytes": {
+        "2.1.01.png": 468909,
+        "2.1.05.png": 423980,
+        "2.1.09.png": 410930,
+        "kodim01.png": 425773,
+        "4.2.03.png": 537169,
+        "4.1.05.png": 94336
+      },
+      "total_bytes": 2361097,
+      "vs_previous_round_percent": -0.95,
+      "seconds": 532
+    },
+    "far-k4-h24 v3": {
+      "per_image_bytes": {
+        "2.1.01.png": 469181,
+        "2.1.05.png": 424234,
+        "2.1.09.png": 412459,
+        "kodim01.png": 423063,
+        "4.2.03.png": 537624,
+        "4.1.05.png": 95475
+      },
+      "total_bytes": 2362036,
+      "vs_previous_round_percent": -0.91,
+      "seconds": 543
+    },
+    "far-k4-e400 sequential": {
+      "per_image_bytes": {
+        "2.1.01.png": 467596,
+        "2.1.05.png": 423355,
+        "2.1.09.png": 410689,
+        "kodim01.png": 419188,
+        "4.2.03.png": 535440,
+        "4.1.05.png": 93514
+      },
+      "total_bytes": 2349782,
+      "vs_previous_round_percent": -1.42,
+      "seconds": 1040
+    },
+    "grouped lr .006 e400": {
+      "per_image_bytes": {
+        "2.1.01.png": 467031,
+        "2.1.05.png": 422105,
+        "2.1.09.png": 410337,
+        "kodim01.png": 416724,
+        "4.2.03.png": 533743,
+        "4.1.05.png": 92833
+      },
+      "total_bytes": 2342773,
+      "vs_previous_round_percent": -1.72,
+      "seconds": 481
+    },
+    "grouped lr .006 e800": {
+      "per_image_bytes": {
+        "2.1.01.png": 467294,
+        "2.1.05.png": 421800,
+        "2.1.09.png": 409620,
+        "kodim01.png": 411475,
+        "4.2.03.png": 532450,
+        "4.1.05.png": 92906
+      },
+      "total_bytes": 2335545,
+      "vs_previous_round_percent": -2.02,
+      "seconds": 1044
+    },
+    "grouped lr .010 e400": {
+      "per_image_bytes": {
+        "2.1.01.png": 466658,
+        "2.1.05.png": 421904,
+        "2.1.09.png": 410127,
+        "kodim01.png": 412924,
+        "4.2.03.png": 533211,
+        "4.1.05.png": 92509
+      },
+      "total_bytes": 2337333,
+      "vs_previous_round_percent": -1.95,
+      "seconds": 497
+    },
+    "grouped lr .010 e800": {
+      "per_image_bytes": {
+        "2.1.01.png": 465918,
+        "2.1.05.png": 421525,
+        "2.1.09.png": 409156,
+        "kodim01.png": 409627,
+        "4.2.03.png": 531686,
+        "4.1.05.png": 92749
+      },
+      "total_bytes": 2330661,
+      "vs_previous_round_percent": -2.23,
+      "seconds": 1053
+    },
+    "grouped lr .015 e400 (frozen h16 candidate)": {
+      "per_image_bytes": {
+        "2.1.01.png": 466047,
+        "2.1.05.png": 421763,
+        "2.1.09.png": 409409,
+        "kodim01.png": 410274,
+        "4.2.03.png": 532195,
+        "4.1.05.png": 92434
+      },
+      "total_bytes": 2332122,
+      "vs_previous_round_percent": -2.16,
+      "seconds": 509
+    },
+    "grouped lr .015 e400 h24 (frozen h24 candidate)": {
+      "per_image_bytes": {
+        "2.1.01.png": 467011,
+        "2.1.05.png": 421853,
+        "2.1.09.png": 411129,
+        "kodim01.png": 407643,
+        "4.2.03.png": 531285,
+        "4.1.05.png": 93700
+      },
+      "total_bytes": 2332621,
+      "vs_previous_round_percent": -2.14,
+      "seconds": 608
+    },
+    "grouped lr .015 e400 fs0": {
+      "per_image_bytes": {
+        "2.1.01.png": 466058,
+        "2.1.05.png": 421831,
+        "2.1.09.png": 409469,
+        "kodim01.png": 416406,
+        "4.2.03.png": 534045,
+        "4.1.05.png": 92398
+      },
+      "total_bytes": 2340207,
+      "vs_previous_round_percent": -1.83,
+      "seconds": 286
+    },
+    "grouped lr .015 e800": {
+      "per_image_bytes": {
+        "2.1.01.png": 465845,
+        "2.1.05.png": 421296,
+        "2.1.09.png": 409381,
+        "kodim01.png": 409423,
+        "4.2.03.png": 532089,
+        "4.1.05.png": 92069
+      },
+      "total_bytes": 2330103,
+      "vs_previous_round_percent": -2.25,
+      "seconds": 1056
+    },
+    "grouped lr .020 e400": {
+      "per_image_bytes": {
+        "2.1.01.png": 466154,
+        "2.1.05.png": 421949,
+        "2.1.09.png": 409422,
+        "kodim01.png": 410862,
+        "4.2.03.png": 532285,
+        "4.1.05.png": 92238
+      },
+      "total_bytes": 2332910,
+      "vs_previous_round_percent": -2.13,
+      "seconds": 516
+    },
+    "grouped lr .030 e400": {
+      "per_image_bytes": {
+        "2.1.01.png": 466144,
+        "2.1.05.png": 421099,
+        "2.1.09.png": 409697,
+        "kodim01.png": 410300,
+        "4.2.03.png": 531246,
+        "4.1.05.png": 92555
+      },
+      "total_bytes": 2331041,
+      "vs_previous_round_percent": -2.21,
+      "seconds": 594
+    }
+  },
+  "frozen_selection_min_h16_h24": {
+    "per_image_bytes": {
+      "2.1.01.png": 466047,
+      "2.1.05.png": 421763,
+      "2.1.09.png": 409409,
+      "kodim01.png": 407643,
+      "4.2.03.png": 531285,
+      "4.1.05.png": 92434
+    },
+    "total_bytes": 2328581,
+    "vs_previous_round_percent": -2.31
+  },
+  "warm_start_probe": "Joint pretraining of hidden/head weights on 13 other known images, then per-image training (sequential lr .003 e200): +0.07..+0.29% larger on the first two images; stopped and removed.",
+  "per_plane_selection_probe": "Choosing each plane from a different candidate would save about 0.03% in estimates; not implemented.",
+  "large_development_images": {
+    "2.2.01 1024x1024, sequential lr .003 e200, h16/h24 x fs0/fs1": {
+      "best_by_candidate": {
+        "scdx": 1880573,
+        "h16-fs0": 1772033,
+        "h16-fs1": 1770484,
+        "h24-fs0": 1767900,
+        "h24-fs1": 1766577
+      },
+      "selected_bytes": 1766577,
+      "seconds": 1526
+    },
+    "2.2.01 sequential lr .003 e400 h16 fs1": {
+      "best_by_candidate": {
+        "h16-fs1": 1766446
+      },
+      "selected_bytes": 1766446,
+      "seconds": 588
+    },
+    "2.2.01 grouped lr .02 e400 h16/h24 fs1": {
+      "best_by_candidate": {
+        "h16-fs1": 1763080,
+        "h24-fs1": 1757906
+      },
+      "selected_bytes": 1757906,
+      "seconds": 374
+    },
+    "wash-ir 2250x2250 tiled, sequential lr .003 e200, h16/h24 x fs0/fs1": {
+      "best_by_candidate": {
+        "scdx": 10748376,
+        "h16-fs0": 10085374,
+        "h16-fs1": 10073828,
+        "h24-fs0": 10054972,
+        "h24-fs1": 10049060
+      },
+      "selected_bytes": 10049060,
+      "seconds": 1669
+    }
+  },
+  "cross_isa_v3_development": [
+    {
+      "file": "precision-q8.nnexp",
+      "file_sha256": "c6c21cc6c7e82a4c767855724309a23a00ffe070c3585752b0866bea10cdd32e",
+      "envelope_version": 3,
+      "pixel_sha256": "2946c84208dde9e700fce6a7babd5dc98619a10a50b36d04677df23af98b577f",
+      "exact_rgb": true,
+      "identical_encoded_bytes": true
+    },
+    {
+      "file": "precision-q8.nnexp",
+      "file_sha256": "5c5a3d5f750398894ccc3e191898f416a2417206c37993ab943a9aa8a506b7b3",
+      "envelope_version": 3,
+      "pixel_sha256": "e21bcd2d1e76393a0a46123efff2791792986d5ef26f69a9fb3e3ffb86747c22",
+      "exact_rgb": true,
+      "identical_encoded_bytes": true
+    },
+    {
+      "file": "precision-q8.nnexp",
+      "file_sha256": "934454cb8f32c45e665160a075d6b7d2da155b8a244fc66473e242c3efb4469e",
+      "envelope_version": 3,
+      "pixel_sha256": "956d855a1957d78810e8b254700292ac4f4c4dfbd40a4388fc05ea8efedbd120",
+      "exact_rgb": true,
+      "identical_encoded_bytes": true
+    },
+    {
+      "file": "precision-q8.nnexp",
+      "file_sha256": "d186fea2645a7ae11f953a2666b56ce6a808d81cd6566da25a934f6e1f14de11",
+      "envelope_version": 3,
+      "pixel_sha256": "98705d3fad694efaeb0963d44ee4e491b719fddbb49ffd639e4a15a9592c79ca",
+      "exact_rgb": true,
+      "identical_encoded_bytes": true
+    },
+    {
+      "file": "precision-q8.nnexp",
+      "file_sha256": "b02dc04e753a5a79d9a6e1e2b0eaec0f70d3fee5e9d85240ca444ac953aef236",
+      "envelope_version": 3,
+      "pixel_sha256": "526f7c8cc1eea030e4417c189920223fb5b3e59317dbca2118f4832f72f97ef2",
+      "exact_rgb": true,
+      "identical_encoded_bytes": true
+    },
+    {
+      "file": "precision-q8.nnexp",
+      "file_sha256": "4b038dd7d7ca4d1ae198348b3e4ea8466fe180aba144bc0f3e0f5065c9c5d26e",
+      "envelope_version": 3,
+      "pixel_sha256": "a00210743353594464ac67e680a41710f484444ca5f9dfddeb570de25c428273",
+      "exact_rgb": true,
+      "identical_encoded_bytes": true
+    },
+    {
+      "file": "precision-q10.nnexp",
+      "file_sha256": "766171eda606df888f2ef30e59d9694686a4ba68d8b04005088db3b3c8508296",
+      "envelope_version": 3,
+      "pixel_sha256": "2946c84208dde9e700fce6a7babd5dc98619a10a50b36d04677df23af98b577f",
+      "exact_rgb": true,
+      "identical_encoded_bytes": true
+    },
+    {
+      "file": "precision-q10.nnexp",
+      "file_sha256": "08bbccf4abcd4ce439030771ea41f1837109de44c370447b4af8299c22600a13",
+      "envelope_version": 3,
+      "pixel_sha256": "e21bcd2d1e76393a0a46123efff2791792986d5ef26f69a9fb3e3ffb86747c22",
+      "exact_rgb": true,
+      "identical_encoded_bytes": true
+    },
+    {
+      "file": "precision-q10.nnexp",
+      "file_sha256": "564b240d617dc260985c6dac1fbf477faefdb2ac116779f6234d5dba1e052c3c",
+      "envelope_version": 3,
+      "pixel_sha256": "956d855a1957d78810e8b254700292ac4f4c4dfbd40a4388fc05ea8efedbd120",
+      "exact_rgb": true,
+      "identical_encoded_bytes": true
+    },
+    {
+      "file": "precision-q10.nnexp",
+      "file_sha256": "7b5a067e9f2ecfab7f9eed01ec155529cda3fc5f5cdc49eb57392850024b7d76",
+      "envelope_version": 3,
+      "pixel_sha256": "98705d3fad694efaeb0963d44ee4e491b719fddbb49ffd639e4a15a9592c79ca",
+      "exact_rgb": true,
+      "identical_encoded_bytes": true
+    },
+    {
+      "file": "precision-q10.nnexp",
+      "file_sha256": "48536cd810716065fe4c54177f25d0dc55299798e92caa88047aafda8bee89e9",
+      "envelope_version": 3,
+      "pixel_sha256": "526f7c8cc1eea030e4417c189920223fb5b3e59317dbca2118f4832f72f97ef2",
+      "exact_rgb": true,
+      "identical_encoded_bytes": true
+    },
+    {
+      "file": "precision-q10.nnexp",
+      "file_sha256": "bf0b346a585928e11ffa85eb62eda1dd02e681573c3a226b67cf02c43d6d6277",
+      "envelope_version": 3,
+      "pixel_sha256": "a00210743353594464ac67e680a41710f484444ca5f9dfddeb570de25c428273",
+      "exact_rgb": true,
+      "identical_encoded_bytes": true
+    }
+  ]
+}

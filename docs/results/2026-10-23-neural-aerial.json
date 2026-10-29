@@ -1,0 +1,1683 @@
+{
+  "complete": true,
+  "scope": "FRESH AS ORIGINALLY RUN. Frozen adaptive settings on all twelve native 512x512 SIPI color aerials. Subsequent tuning on these inputs is not fresh validation.",
+  "summary": {
+    "count": 12,
+    "wins": 12,
+    "exact_rgba": true,
+    "total_bytes": 5242156,
+    "best_bare_bytes": 5508321,
+    "actual_scdx_floor_bytes": 5512263,
+    "aggregate_saving_percent": 4.832053179181095,
+    "median_saving_percent": 4.433686032765494
+  },
+  "protocol_sha256": "e27ee4554ca775d2e41244020b1fab854771fd0b5873144a65c67584e96a1cbe",
+  "protocol": {
+    "scope": "Frozen before measuring any aerial image. This file records a protocol, not results.",
+    "corpus": "USC SIPI aerials, all twelve native 512x512 color images 2.1.01 through 2.1.12",
+    "selection": "Publisher-listed native dimensions and color type only; no crops, resizing, previews, or result-based exclusions. The 1024x1024 and 2250x2250 images are outside this validation's compute budget.",
+    "prior_known_inputs": "Kodak 01-03 development; all 14 SIPI miscellaneous color images now regressions",
+    "encoder": "scripts/research/local_probability/compress.py",
+    "floor": {
+      "format": "complete wrapped SCDX",
+      "profile": "balanced",
+      "hybrid": true,
+      "partition_depth": 0
+    },
+    "learned": {
+      "hidden_widths": [
+        16,
+        32
+      ],
+      "hidden_layers": 2,
+      "mixtures": 3,
+      "causal_context": true,
+      "epochs": 200,
+      "batch": 8192,
+      "learning_rate": 0.001,
+      "seed": 20261023,
+      "cpu_threads": 4,
+      "device": "auto (MPS on this machine)",
+      "weight_precision_candidates": [
+        16,
+        12,
+        10,
+        8
+      ],
+      "precision_scope": "Power-of-two-grid rounding of hidden/head weight matrices only, unchanged guide, affine, and biases. Binary16 model tensors remain in-band.",
+      "format": "self-contained integer NNEX v2 with SHA-256 raw RGB checksum",
+      "train_pixel_limit": 1048576
+    },
+    "selection_rule": "Encode all eight learned candidates, verify each independently, choose the smallest complete file against the actual wrapped SCDX. Keep floor on ties.",
+    "baselines": "Exact RGB PNG (Pillow optimize), WebP lossless cwebp -z 9 -exact, native JPEG XL lossless effort 9, numthreads 1; verify every round-trip",
+    "reporting": "All twelve images, complete files including transmitted model and headers, per-image and aggregate bytes, exact RGBA verification, hashes. No adaptive tuning during this cohort. Runtime under concurrent workers is not isolated latency.",
+    "limitations": "One small aerial corpus, not broad proof or maximum-strength coverage of all existing codecs. Production defaults remain unchanged."
+  },
+  "source_manifest_sha256": "e9c030aef4a1919d3d7e2cd1b5776d550dda6056ec2e90732537f888b03e8ead",
+  "source_manifest": {
+    "source": "https://sipi.usc.edu/database/aerials.tar.gz",
+    "source_page": "https://sipi.usc.edu/database/database.php?volume=aerials",
+    "selection": "Every native 512x512 color image in the published aerials volume, selected before compression measurements. Larger native images are outside this validation's compute budget. No previews, crops, resizing, or result-based selection.",
+    "transform": "TIFF to PNG, exact RGB samples verified, no resizing",
+    "role": "fresh held-out validation; not used to select model parameters",
+    "archive_sha256": "dbb41d82de61e834ad0b92ffa9561148f58c847ba75a348b8b8df073fc6f6d8b",
+    "images": [
+      {
+        "image": "2.1.01.png",
+        "source_entry": "aerials/2.1.01.tiff",
+        "source_sha256": "942295f70780de2a7208dd4064dcea51a1dccaf301aa08d40f7bc5e7f692dc22",
+        "png_sha256": "52cd6674693a2f9f4a58d0e77b10560e8c64731f1539503c8b3356e28ab7e22f",
+        "pixel_sha256": "2946c84208dde9e700fce6a7babd5dc98619a10a50b36d04677df23af98b577f"
+      },
+      {
+        "image": "2.1.02.png",
+        "source_entry": "aerials/2.1.02.tiff",
+        "source_sha256": "ce29735c596d7f4892a8717d190bb5cb10509ec79f5884bf29cc3858f6d37b99",
+        "png_sha256": "74bb0736c88a4d651484182465174a702a515556dc1ae44f9ffdae3626fc863d",
+        "pixel_sha256": "d5deb514398760f3153fe742c2bff23b48625ddccf10cae3015129b06569a917"
+      },
+      {
+        "image": "2.1.03.png",
+        "source_entry": "aerials/2.1.03.tiff",
+        "source_sha256": "7d2da1613d074370327818e52ed33fb8ac76dc0261b404e86da0bc30c66c4dd0",
+        "png_sha256": "b3175c4a79aa179f763f0dbd9e301643ce2648b0e2788e3af50a03bca0d6b76e",
+        "pixel_sha256": "2193153fe9433c342ebeb930bc6e5b44352697cb6cf67cfe8fb4f9cba7cc5601"
+      },
+      {
+        "image": "2.1.04.png",
+        "source_entry": "aerials/2.1.04.tiff",
+        "source_sha256": "ab7ff6cf819fff269c3d3bd9654689a001ee3be2900c05d5bc5af168faa63763",
+        "png_sha256": "b4842eeab9f33665a9229590cd8e477783e0009fdd802ecbeb9b9572daf7cd65",
+        "pixel_sha256": "2e7b94055ab1c39f77a97f5512b3055e69ba1193ceab214a34901a3555ff5194"
+      },
+      {
+        "image": "2.1.05.png",
+        "source_entry": "aerials/2.1.05.tiff",
+        "source_sha256": "053a5945bf10972696abe0f9c8953598a0f3aad2a1defcb0f004f0a06200bb7d",
+        "png_sha256": "98526114135c18cdade5a0ceb94cf9d92b613c637827f2c98a3edda8158a6529",
+        "pixel_sha256": "e21bcd2d1e76393a0a46123efff2791792986d5ef26f69a9fb3e3ffb86747c22"
+      },
+      {
+        "image": "2.1.06.png",
+        "source_entry": "aerials/2.1.06.tiff",
+        "source_sha256": "db37a44659eb726d97bde109eb99fb0a1623081d4be878e8a6d69539276c8344",
+        "png_sha256": "80229aa3a2306522e46b3bffb00ceae987de86306fe3c4e45bb880e41ebde6f8",
+        "pixel_sha256": "06a375c3cbb3c9266971a97a13cfa7d71d15ee3334c4d3fee271fa34dfdfd51d"
+      },
+      {
+        "image": "2.1.07.png",
+        "source_entry": "aerials/2.1.07.tiff",
+        "source_sha256": "b8459c94e93b14cf54234ff3b6cc44fd3835bff1ecd3419bc278e26077f5aa1d",
+        "png_sha256": "2cc4d3e7372170e5083c1544ff5245784d57d42eabaed83df413ff1d1adbf2ee",
+        "pixel_sha256": "d73404e8597736872ecc55cf23fd806e9c870db9431fdfa1c3ce08ee4858ec8f"
+      },
+      {
+        "image": "2.1.08.png",
+        "source_entry": "aerials/2.1.08.tiff",
+        "source_sha256": "e7e76690bec9de0260f6a6c80ce63bcf53eda96de896cb7a41d4e20168fcb782",
+        "png_sha256": "5d79f45703db5f5ada925643d0e9f8b4a0f8d6fcd15d07be64a74e472acfafd8",
+        "pixel_sha256": "cc9239a566040982c4feccc7d987430fec29d6cd34045ba836c9d56521ba4ada"
+      },
+      {
+        "image": "2.1.09.png",
+        "source_entry": "aerials/2.1.09.tiff",
+        "source_sha256": "4182e05595554243bbf4519231080859c4a1d25e2d38f65c3d0f0eda4cdb298e",
+        "png_sha256": "69ca0f150eea0673d03b586010cea44bc8b9e6d0ebeebfe91eb8e7fb937dc46c",
+        "pixel_sha256": "956d855a1957d78810e8b254700292ac4f4c4dfbd40a4388fc05ea8efedbd120"
+      },
+      {
+        "image": "2.1.10.png",
+        "source_entry": "aerials/2.1.10.tiff",
+        "source_sha256": "ba1ddaeaf57ca089c6dc6aae14fc43b4543221638bf16a1098ab1bef1c20bcc4",
+        "png_sha256": "e14215139d654fa9f6a66ff2b01e325b118802a40261e2e9a40046ec73b4ba50",
+        "pixel_sha256": "9742c31a5a45cc53305e64d75fb2aff4a833abccffb22fcd1db494ea6cfe6994"
+      },
+      {
+        "image": "2.1.11.png",
+        "source_entry": "aerials/2.1.11.tiff",
+        "source_sha256": "c56e4fe29e32e8d6c575852809e23a511ccf2b1ca9d770deede38c9a4080c4f8",
+        "png_sha256": "a7dfcf65235aa5505b35aad1deb37c2df37be1e894af8500d72459a8d07cf827",
+        "pixel_sha256": "e49cdf384b76ea947b76bc805c74bced1e70670b1ad284ce1bd8dbe92e41c53d"
+      },
+      {
+        "image": "2.1.12.png",
+        "source_entry": "aerials/2.1.12.tiff",
+        "source_sha256": "fb5992f18788a27e0cfbca7850a5035ad4070bf8e76d6828c9de3d2892bdf782",
+        "png_sha256": "2b4bb0e1e2657ff89f321b62dea67d9a39da93d7bda003ab6ed46e68f2a3bc16",
+        "pixel_sha256": "46004c94df8ac538320ee17a8e05c34bc0cf2d4ced61683677a820fcfbc5fafe"
+      }
+    ]
+  },
+  "native_backend_sha256": "80f2e77dc355eeda6d5e6f9ec7237fbfe0796c59427d7f65a37e8387fe400620",
+  "images": [
+    {
+      "image": "2.1.01.png",
+      "source_sha256": "52cd6674693a2f9f4a58d0e77b10560e8c64731f1539503c8b3356e28ab7e22f",
+      "rgba_sha256": "1b5a80d2c5ac754f8a65527cd6727e09f49c024dcfd27441097eac6adbb4bc62",
+      "complete_file_bytes": 470030,
+      "selected": {
+        "format": "nnex-v2",
+        "hidden": 16,
+        "bits": 8,
+        "model_bytes": 4640
+      },
+      "candidates": [
+        {
+          "format": "scdx",
+          "codec": "webp-lossless",
+          "complete_file_bytes": 495721
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 16,
+          "bits": 16,
+          "model_bytes": 7206,
+          "complete_file_bytes": 472053,
+          "model_sha256": "5eea900b5578c5c9953fecde27d7545993db9211b032fb2221c690b0a6982ec8",
+          "file_sha256": "3079ea8f25101c7ed9d2b317c7757a21a24a00aac02e229876c23c50b8c5038d",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 16,
+          "bits": 12,
+          "model_bytes": 6375,
+          "complete_file_bytes": 471235,
+          "model_sha256": "b7f8ceb7b968326a4faedd612f070cc2b47d25b44e6807912b0f922dcf051398",
+          "file_sha256": "4ccfbe7b025ad0842e83fea50ad29c836cf016da20de9ba991b7e6ccba72aa3d",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 16,
+          "bits": 10,
+          "model_bytes": 5612,
+          "complete_file_bytes": 470539,
+          "model_sha256": "51aabf5746bdb99b4a01729a1fa9609e83aeaad2d4933473af8ee348698c6147",
+          "file_sha256": "f00d9c331413f7e1a8e92ac14e319f0fd47e942976157c0f20661b9251703e5d",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 16,
+          "bits": 8,
+          "model_bytes": 4640,
+          "complete_file_bytes": 470030,
+          "model_sha256": "39a27ef075e47233b8ebce6d57f9073577e3722e0740c013d0e834bbdc0599ea",
+          "file_sha256": "4393bb659ccd7c647595ba0be0e81fca7528ffbb7e17b3293700da0717d471e3",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 32,
+          "bits": 16,
+          "model_bytes": 16531,
+          "complete_file_bytes": 479282,
+          "model_sha256": "b4b36081c9a3c2f215d5e7f852176af6830b6938bf094d05cf833116e336cdaf",
+          "file_sha256": "23159f41315cf54e96a475520e94a3518eaf833e233bfd886cda3e588fd8add8",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 32,
+          "bits": 12,
+          "model_bytes": 14365,
+          "complete_file_bytes": 477128,
+          "model_sha256": "4f1061c0bd8177dc5a80469ee704326cf5772480a401e3b1d59e01475e27cb1d",
+          "file_sha256": "c9661194261ac9252c055a23c0f384e535c12a438543ef5e8818b00d1f4ad3f1",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 32,
+          "bits": 10,
+          "model_bytes": 12465,
+          "complete_file_bytes": 475266,
+          "model_sha256": "29fbb59a8a4a018afef0cc3844e9536c1f4ef23224c5eb821dda205a12d5dcc1",
+          "file_sha256": "a58cf181aa5ee635679a9e7f6bfa65da92971f4b7889f9c75928fb5f6558d6ab",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 32,
+          "bits": 8,
+          "model_bytes": 9992,
+          "complete_file_bytes": 473240,
+          "model_sha256": "2300104f0b7ae56539c06cb8502979b9476b2cb9554389a1b293a757001f827e",
+          "file_sha256": "8692db0079602ef9f436dc032394dcec2cd6724f77e9f820898989fb80bbb6b0",
+          "exact_rgb": true
+        }
+      ],
+      "exact_rgba": true,
+      "learned_skipped": null,
+      "seconds": 176.24886366602732,
+      "warning": "Experimental multi-format tool, not the default scodec command or a stable release. The floor is a complete wrapped SCDX, not an unwrapped oracle. Torch training seeds global RNGs and is intended for CLI use.",
+      "baselines": {
+        "jxl-lossless-e9": 497101,
+        "png": 585114,
+        "webp-lossless": 495392
+      },
+      "file_sha256": "4393bb659ccd7c647595ba0be0e81fca7528ffbb7e17b3293700da0717d471e3",
+      "source_pixel_sha256": "2946c84208dde9e700fce6a7babd5dc98619a10a50b36d04677df23af98b577f"
+    },
+    {
+      "image": "2.1.02.png",
+      "source_sha256": "74bb0736c88a4d651484182465174a702a515556dc1ae44f9ffdae3626fc863d",
+      "rgba_sha256": "70ef665cb74160828e06e2c03aa6fb64bea019062c90653c5ba4c74a16f19646",
+      "complete_file_bytes": 479386,
+      "selected": {
+        "format": "nnex-v2",
+        "hidden": 16,
+        "bits": 10,
+        "model_bytes": 5696
+      },
+      "candidates": [
+        {
+          "format": "scdx",
+          "codec": "webp-lossless",
+          "complete_file_bytes": 516981
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 16,
+          "bits": 16,
+          "model_bytes": 7242,
+          "complete_file_bytes": 480714,
+          "model_sha256": "4048acf96bbef7ce4235b24502ac8fd4d547fc42011a43ecf2a95705d3d01480",
+          "file_sha256": "3b9c10800ee1337e8331319b82d6a8f29b31153e0deb468aa1514d76643e52c6",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 16,
+          "bits": 12,
+          "model_bytes": 6443,
+          "complete_file_bytes": 479935,
+          "model_sha256": "f2d70f38c617d496efd3e0c682068364eedc40beda81a7e2d3190a6c740347c9",
+          "file_sha256": "c5cfaed30a47c1e093f085e275d2ee3d71e18de9e6b5e5e226e2afe17283cedc",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 16,
+          "bits": 10,
+          "model_bytes": 5696,
+          "complete_file_bytes": 479386,
+          "model_sha256": "3895230cd1d23a28b8b547cca6b13f3dffed0d84fe5597dcb0392d7342917729",
+          "file_sha256": "5f9e1af97b747a438af1d08dd352206ec40c1bdc3c38ff1ce12cff9c471ba6c2",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 16,
+          "bits": 8,
+          "model_bytes": 4712,
+          "complete_file_bytes": 480065,
+          "model_sha256": "116bc05d4a666c44b740534af0e686be48d4a6d4e857e44fe7f4c262274d2c3b",
+          "file_sha256": "b578dc1fc7c803bcf7b4f03a77f5badcded1e23d2d6b58d9658b01901c1ec779",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 32,
+          "bits": 16,
+          "model_bytes": 16586,
+          "complete_file_bytes": 486645,
+          "model_sha256": "06585e42528c8f6b8583cab8bf01ddb12717664b7188f7454e2a0b25010095ae",
+          "file_sha256": "ceb763a7b19135b23e0bec0483866d2691e0b5fcf3146096ffc126a155caf0fe",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 32,
+          "bits": 12,
+          "model_bytes": 14343,
+          "complete_file_bytes": 484419,
+          "model_sha256": "4a61ae743160c87cbee3ef1f8b62fa33d119c5788886ed51bff5e089ec6865cd",
+          "file_sha256": "d0b92bc98d0a642c4d8c98d01609521daa9db3ffb9134b8a95f36e8ee0b910cf",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 32,
+          "bits": 10,
+          "model_bytes": 12336,
+          "complete_file_bytes": 482469,
+          "model_sha256": "a313369b37904dd7e54afcc2622247edd276eb7ebbc71be2ad59c672e3800885",
+          "file_sha256": "5a72fda25b9e573f8a15dde767f9223e140dbf42fc77b81e2438596be9a9aa22",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 32,
+          "bits": 8,
+          "model_bytes": 9822,
+          "complete_file_bytes": 480771,
+          "model_sha256": "641340915998287e5b59345e7f5c150708b20a29ae693e32973cb548c9a2f066",
+          "file_sha256": "9b8b7e875158e82df44eab213103350308243a3b70f6e83dd19fa6b341856f5f",
+          "exact_rgb": true
+        }
+      ],
+      "exact_rgba": true,
+      "learned_skipped": null,
+      "seconds": 183.65651654195972,
+      "warning": "Experimental multi-format tool, not the default scodec command or a stable release. The floor is a complete wrapped SCDX, not an unwrapped oracle. Torch training seeds global RNGs and is intended for CLI use.",
+      "baselines": {
+        "jxl-lossless-e9": 521380,
+        "png": 618625,
+        "webp-lossless": 516652
+      },
+      "file_sha256": "5f9e1af97b747a438af1d08dd352206ec40c1bdc3c38ff1ce12cff9c471ba6c2",
+      "source_pixel_sha256": "d5deb514398760f3153fe742c2bff23b48625ddccf10cae3015129b06569a917"
+    },
+    {
+      "image": "2.1.03.png",
+      "source_sha256": "b3175c4a79aa179f763f0dbd9e301643ce2648b0e2788e3af50a03bca0d6b76e",
+      "rgba_sha256": "90ae4c83bb246107385bda352cb3bdeb4f2a8c41380f09cf7dfdf5d49e73397a",
+      "complete_file_bytes": 380106,
+      "selected": {
+        "format": "nnex-v2",
+        "hidden": 16,
+        "bits": 8,
+        "model_bytes": 4740
+      },
+      "candidates": [
+        {
+          "format": "scdx",
+          "codec": "webp-lossless",
+          "complete_file_bytes": 398273
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 16,
+          "bits": 16,
+          "model_bytes": 7201,
+          "complete_file_bytes": 381670,
+          "model_sha256": "c1c2775c47a50737f6481924b5dfdf075c50114cdd5ceac3079ad668f8fb9f34",
+          "file_sha256": "70bf60eb7ab5f15fb082cfa35f070cb5d380701d7514e531f969be6e4a83db9d",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 16,
+          "bits": 12,
+          "model_bytes": 6420,
+          "complete_file_bytes": 380879,
+          "model_sha256": "7addaffe74f9d4f3c2da84ec8034ce6f67d47c941e29ff3ef30f75fa734c101c",
+          "file_sha256": "07d9a0b4f4a479fa66f1f31663dfd27d2ddd3695dc3b88febf68779438c3331a",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 16,
+          "bits": 10,
+          "model_bytes": 5683,
+          "complete_file_bytes": 380250,
+          "model_sha256": "769b0f267fd78c1619e0fbe97ab1a7dec4854305bffe96a4fae30908b4d3b53a",
+          "file_sha256": "4b20d47a46f62a39ef146826bf975845d1f81be4431b2704ae684829e4361d3d",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 16,
+          "bits": 8,
+          "model_bytes": 4740,
+          "complete_file_bytes": 380106,
+          "model_sha256": "edcad8b662ace1ac5d755386350670004c70955271763fc2b93074114461b734",
+          "file_sha256": "05364dec837489e20533c1268125280206912edb54ffaddd8e652aca596949e4",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 32,
+          "bits": 16,
+          "model_bytes": 16499,
+          "complete_file_bytes": 389596,
+          "model_sha256": "3daa16d93c315c619c6e8463fe4fd26212bdfcde90ad929b200d9cdc17804aed",
+          "file_sha256": "73fdad35ca93f93b5cf5f27eb6db74c04e8a97b901af81c01a75a94ccef688c4",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 32,
+          "bits": 12,
+          "model_bytes": 14308,
+          "complete_file_bytes": 387372,
+          "model_sha256": "384a466973e2b460078b000e06d3d1884006f42d27ef75deaf6d9f5c4728738d",
+          "file_sha256": "b62f74eb34533fd1437c5c529ab695fc1b079921f4af8e37b9b9c8c77d79f23d",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 32,
+          "bits": 10,
+          "model_bytes": 12371,
+          "complete_file_bytes": 385613,
+          "model_sha256": "5275a69594c08de2172f931025ba3061297d5d779243e278cf7b3f0b5507530d",
+          "file_sha256": "13517cb999747e1902554198d56968d602daf10bce2ff7bd316392ea947a73ce",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 32,
+          "bits": 8,
+          "model_bytes": 10011,
+          "complete_file_bytes": 384136,
+          "model_sha256": "6e166b106b41973febba18b28fa079257298ea1fea0db55a86b331b1ce5417c0",
+          "file_sha256": "f73b1a0953c60eb4e6ef8036e3d42be4f07623b13f7c17d9eb7eb53699294297",
+          "exact_rgb": true
+        }
+      ],
+      "exact_rgba": true,
+      "learned_skipped": null,
+      "seconds": 194.36463120795088,
+      "warning": "Experimental multi-format tool, not the default scodec command or a stable release. The floor is a complete wrapped SCDX, not an unwrapped oracle. Torch training seeds global RNGs and is intended for CLI use.",
+      "baselines": {
+        "jxl-lossless-e9": 405586,
+        "png": 458734,
+        "webp-lossless": 397944
+      },
+      "file_sha256": "05364dec837489e20533c1268125280206912edb54ffaddd8e652aca596949e4",
+      "source_pixel_sha256": "2193153fe9433c342ebeb930bc6e5b44352697cb6cf67cfe8fb4f9cba7cc5601"
+    },
+    {
+      "image": "2.1.04.png",
+      "source_sha256": "b4842eeab9f33665a9229590cd8e477783e0009fdd802ecbeb9b9572daf7cd65",
+      "rgba_sha256": "d0f9fde7aa7edba5d8506dc8a0b8f94fd84cb934c8c9c3682c6d3f8d5b0839a9",
+      "complete_file_bytes": 436317,
+      "selected": {
+        "format": "nnex-v2",
+        "hidden": 16,
+        "bits": 8,
+        "model_bytes": 4675
+      },
+      "candidates": [
+        {
+          "format": "scdx",
+          "codec": "webp-lossless",
+          "complete_file_bytes": 461175
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 16,
+          "bits": 16,
+          "model_bytes": 7179,
+          "complete_file_bytes": 438111,
+          "model_sha256": "bbcce472fb39b10d990c95bc92d5d1ed0f3ff0b8533f55a210f2c371d1e411f8",
+          "file_sha256": "9d813022a74fe3543b377a12b1d1989a2347dd0618da28cbcd559a507f195d79",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 16,
+          "bits": 12,
+          "model_bytes": 6362,
+          "complete_file_bytes": 437294,
+          "model_sha256": "38c8fefa0eb21fb316d9caef036ed7d42af68bdd33b06a7a780e4a6800082418",
+          "file_sha256": "fa80a7e68c4849eea52bdf2e72cc75fca91ac831d56363ae63a8741d47f5f490",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 16,
+          "bits": 10,
+          "model_bytes": 5629,
+          "complete_file_bytes": 436565,
+          "model_sha256": "3c3f09204c178deea5beef509008fc875622613fc7a66104832f74e02b6946f1",
+          "file_sha256": "c725f3b0a60e14d248b23d6b7164bf8841b4298210d5b461a859d4ca04a7477a",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 16,
+          "bits": 8,
+          "model_bytes": 4675,
+          "complete_file_bytes": 436317,
+          "model_sha256": "36fc04c65d7c6fb652a3d9e37467a0273f89e6c1ae3817ee7d7063faf9eff79f",
+          "file_sha256": "a08714340391bb3ed64faf2a902474bf92dee1d785332281cc61d2c017170a72",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 32,
+          "bits": 16,
+          "model_bytes": 16494,
+          "complete_file_bytes": 446312,
+          "model_sha256": "50d7dbdbdce8fb4d29732d065d316880bb1ac1b10dde3608b7eac3124b6decd9",
+          "file_sha256": "a3f548682989ae2352f278d4f5e6fc1c8bfd5931675aefd46d189144b878b8f2",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 32,
+          "bits": 12,
+          "model_bytes": 14425,
+          "complete_file_bytes": 444232,
+          "model_sha256": "6908838e26494c36a402d1d569fc9a80d6153be62fb3b50166239d19097331fe",
+          "file_sha256": "76a24fd932b4a758945e61e3e4483affa9a7c54d5e080851e63f9e6413df263f",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 32,
+          "bits": 10,
+          "model_bytes": 12616,
+          "complete_file_bytes": 442463,
+          "model_sha256": "85c943e91b94fc92c9974a2f5394e9718aae6e1895991e454e265070f5c4ce08",
+          "file_sha256": "a10828bd423a4be5e72edfe56bafa83cbae07e69495edfc0cced7837b1bb8f5a",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 32,
+          "bits": 8,
+          "model_bytes": 10209,
+          "complete_file_bytes": 440563,
+          "model_sha256": "dec60edea18132a5078202764613230f217f0bbb3af3d937796169561e417ec1",
+          "file_sha256": "c81b3b455546266c3d63cf6fa01092e2b15c427d840c55c4acb8aab3b73f745a",
+          "exact_rgb": true
+        }
+      ],
+      "exact_rgba": true,
+      "learned_skipped": null,
+      "seconds": 172.11488266702509,
+      "warning": "Experimental multi-format tool, not the default scodec command or a stable release. The floor is a complete wrapped SCDX, not an unwrapped oracle. Torch training seeds global RNGs and is intended for CLI use.",
+      "baselines": {
+        "jxl-lossless-e9": 473937,
+        "png": 573533,
+        "webp-lossless": 460846
+      },
+      "file_sha256": "a08714340391bb3ed64faf2a902474bf92dee1d785332281cc61d2c017170a72",
+      "source_pixel_sha256": "2e7b94055ab1c39f77a97f5512b3055e69ba1193ceab214a34901a3555ff5194"
+    },
+    {
+      "image": "2.1.05.png",
+      "source_sha256": "98526114135c18cdade5a0ceb94cf9d92b613c637827f2c98a3edda8158a6529",
+      "rgba_sha256": "bb7f03cf16be71cf876338a33e95380c9ac582a627da3c97772b654d99c93e65",
+      "complete_file_bytes": 426078,
+      "selected": {
+        "format": "nnex-v2",
+        "hidden": 16,
+        "bits": 8,
+        "model_bytes": 4698
+      },
+      "candidates": [
+        {
+          "format": "scdx",
+          "codec": "jxl-lossless",
+          "complete_file_bytes": 454517
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 16,
+          "bits": 16,
+          "model_bytes": 7213,
+          "complete_file_bytes": 427999,
+          "model_sha256": "f403edc0a26554eeeb76516c58559334be3659d43b1c832bb02449b82f30cad0",
+          "file_sha256": "e41b5926876d1806540d2cdf953c5dc7fadcc54e6d3caeb683795d4685e569a8",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 16,
+          "bits": 12,
+          "model_bytes": 6402,
+          "complete_file_bytes": 427191,
+          "model_sha256": "643964f80959718938ff37c77f354c4ad393efc049f371c41520fd9b0f0b876f",
+          "file_sha256": "ae264aea9b188a8c151faac183156f21421b8b286ef35d5dc4a357437978e9fa",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 16,
+          "bits": 10,
+          "model_bytes": 5645,
+          "complete_file_bytes": 426445,
+          "model_sha256": "27db1cdb7a9d48696588c7b52f205023924e5d2e44612b1a486d6be8938f8537",
+          "file_sha256": "87f8a667faff56c9f066a37c9c36f86d0f994640b3242e10960406dafe897376",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 16,
+          "bits": 8,
+          "model_bytes": 4698,
+          "complete_file_bytes": 426078,
+          "model_sha256": "3c91db31cbbdbe434cb158ec73f36e43f07b9f1ba80004653842339b65cee5f5",
+          "file_sha256": "e606b10f6528ca51b61a2b837d0169277495d30b8e00d0d0ccb91a0ada838639",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 32,
+          "bits": 16,
+          "model_bytes": 16524,
+          "complete_file_bytes": 434484,
+          "model_sha256": "37c4c1fc7cc17dfcc7b64ab7b1734344173c95a55be7dfaa3e8366c9797906cf",
+          "file_sha256": "827e10844dc2466896f238220227fbcc3fd9c657e5c5f6ec0be425d10a12a611",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 32,
+          "bits": 12,
+          "model_bytes": 14454,
+          "complete_file_bytes": 432423,
+          "model_sha256": "798bff9d646d827b342fdff29a0f39ec445f700d2cf7744dce49ef3e0fac9f9b",
+          "file_sha256": "f5636fb455ea0dd2605b300bed5e92113e6af83ef90183b47e49b89b2b93f259",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 32,
+          "bits": 10,
+          "model_bytes": 12668,
+          "complete_file_bytes": 430627,
+          "model_sha256": "ad636e46d9011a723f24a0a18a7571dd1608f5d75b25b079999cd8bd2fd3c3b2",
+          "file_sha256": "9dd6b0f949fe3a08b96fe55fbe6405e3e35dccef7cebf15e826ce91f31b0db65",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 32,
+          "bits": 8,
+          "model_bytes": 10431,
+          "complete_file_bytes": 428736,
+          "model_sha256": "3ab0b1f394ec26c58919b066989e800f1d32f101ee53080fa2f5641964110a2f",
+          "file_sha256": "20e26d9c3f9358bf7e7ae6a6918b62c1a2f4c2b0167599f80f456dfcf4374c93",
+          "exact_rgb": true
+        }
+      ],
+      "exact_rgba": true,
+      "learned_skipped": null,
+      "seconds": 179.60311295796419,
+      "warning": "Experimental multi-format tool, not the default scodec command or a stable release. The floor is a complete wrapped SCDX, not an unwrapped oracle. Torch training seeds global RNGs and is intended for CLI use.",
+      "baselines": {
+        "jxl-lossless-e9": 454189,
+        "png": 526826,
+        "webp-lossless": 459640
+      },
+      "file_sha256": "e606b10f6528ca51b61a2b837d0169277495d30b8e00d0d0ccb91a0ada838639",
+      "source_pixel_sha256": "e21bcd2d1e76393a0a46123efff2791792986d5ef26f69a9fb3e3ffb86747c22"
+    },
+    {
+      "image": "2.1.06.png",
+      "source_sha256": "80229aa3a2306522e46b3bffb00ceae987de86306fe3c4e45bb880e41ebde6f8",
+      "rgba_sha256": "212d54288ed0069cc9f8787257d80ce9aa9261c63a83be6d0baad06b6ad46d77",
+      "complete_file_bytes": 478338,
+      "selected": {
+        "format": "nnex-v2",
+        "hidden": 16,
+        "bits": 10,
+        "model_bytes": 5669
+      },
+      "candidates": [
+        {
+          "format": "scdx",
+          "codec": "jxl-lossless",
+          "complete_file_bytes": 507976
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 16,
+          "bits": 16,
+          "model_bytes": 7235,
+          "complete_file_bytes": 479892,
+          "model_sha256": "39ef2346f104aa9e76c13ab0035801c580eb21efed873000fc11a9976be35182",
+          "file_sha256": "a8047860b73b89b505ae8bc0fe3966fa54d2fe80601b406344e923b540f164f9",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 16,
+          "bits": 12,
+          "model_bytes": 6404,
+          "complete_file_bytes": 479040,
+          "model_sha256": "7f3f00e211636e8e2e933556419688e44f09094d74505d925bb5412fdec1e2c8",
+          "file_sha256": "f9877de33bded661e48018825d551abaefa3a18b628694089dde67f42e674432",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 16,
+          "bits": 10,
+          "model_bytes": 5669,
+          "complete_file_bytes": 478338,
+          "model_sha256": "3cda3e7e4af30acda40514da7a73cb23f245baaae48679603755779f97215003",
+          "file_sha256": "0f3f78202d58fcdc1cde42cc7531ea183dd028d8151f195ebb12843951ebab35",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 16,
+          "bits": 8,
+          "model_bytes": 4677,
+          "complete_file_bytes": 478453,
+          "model_sha256": "1cb2ab1502451c60b284f9bb738927c43c33b435047c628716a4eeb8844feac9",
+          "file_sha256": "ef34189b41b25abb2b071bcc6c2069050d563c88f373d850e9b9e63e75d682be",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 32,
+          "bits": 16,
+          "model_bytes": 16526,
+          "complete_file_bytes": 485375,
+          "model_sha256": "2a96c3fe15705493f54a963b53ceff5fd4a6154447dd6aa983132648f343aa10",
+          "file_sha256": "a80a39dd09fb069db9844a3b24b9333fdaeb64a1279fecf6189a23c14c0cadd9",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 32,
+          "bits": 12,
+          "model_bytes": 14250,
+          "complete_file_bytes": 483088,
+          "model_sha256": "2e72fe97573307bb13ad0fb300cb2b505979967ee8718d423502493eda14387b",
+          "file_sha256": "ec3c122644e037c7f37d5ebbdfdcc711b490c8f6e2cbcc5f019f3d3c665257e5",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 32,
+          "bits": 10,
+          "model_bytes": 12223,
+          "complete_file_bytes": 481135,
+          "model_sha256": "7f092da28a3393b4d1601ad3a27e422eeb5d68104a04e5a1a566c86313d68b56",
+          "file_sha256": "34a9b7fdd3ff77fa7d7f52421b86c0178be72872c7a4bdaa98fdfba8771676cb",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 32,
+          "bits": 8,
+          "model_bytes": 9596,
+          "complete_file_bytes": 479165,
+          "model_sha256": "f123615622f5a00fb18f1337591ed165a477c8c4b4be6b48e4788ff8a4b1bb9b",
+          "file_sha256": "7e091837d5781625d67b5b03a96193125bd84586bef33e18839843a04e682a16",
+          "exact_rgb": true
+        }
+      ],
+      "exact_rgba": true,
+      "learned_skipped": null,
+      "seconds": 183.54483487497782,
+      "warning": "Experimental multi-format tool, not the default scodec command or a stable release. The floor is a complete wrapped SCDX, not an unwrapped oracle. Torch training seeds global RNGs and is intended for CLI use.",
+      "baselines": {
+        "jxl-lossless-e9": 507648,
+        "png": 579495,
+        "webp-lossless": 512344
+      },
+      "file_sha256": "0f3f78202d58fcdc1cde42cc7531ea183dd028d8151f195ebb12843951ebab35",
+      "source_pixel_sha256": "06a375c3cbb3c9266971a97a13cfa7d71d15ee3334c4d3fee271fa34dfdfd51d"
+    },
+    {
+      "image": "2.1.07.png",
+      "source_sha256": "2cc4d3e7372170e5083c1544ff5245784d57d42eabaed83df413ff1d1adbf2ee",
+      "rgba_sha256": "9d70baaa60d484ab9c9646ee45628f39509619ee7b46f0c2e4e152b595688d0d",
+      "complete_file_bytes": 414372,
+      "selected": {
+        "format": "nnex-v2",
+        "hidden": 16,
+        "bits": 8,
+        "model_bytes": 4732
+      },
+      "candidates": [
+        {
+          "format": "scdx",
+          "codec": "webp-lossless",
+          "complete_file_bytes": 431209
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 16,
+          "bits": 16,
+          "model_bytes": 7174,
+          "complete_file_bytes": 416384,
+          "model_sha256": "8f90a5c7f539c398668891dcc4c7f58bd6f05502fb7fe4d23b931d0eafe62bab",
+          "file_sha256": "ce951841842208eb6994b299835b4c67596584859f4ca3180cea2cb5aaa6fe3b",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 16,
+          "bits": 12,
+          "model_bytes": 6438,
+          "complete_file_bytes": 415647,
+          "model_sha256": "f30850c95c7690e87706b3c3aef3e740da33265b9be1730915d69bc33133c990",
+          "file_sha256": "5b40cdaf883ca21ee9cd256a0b025149201884297880e8b9c389f8575241f391",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 16,
+          "bits": 10,
+          "model_bytes": 5708,
+          "complete_file_bytes": 415031,
+          "model_sha256": "0b908ad8421c5b019f95a1abbcbb80ae10de518d64c9f3aa8feab6092389c281",
+          "file_sha256": "ef6f815feb220b718372a67464ad55f749456d0fd1065433c712f198c78745c5",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 16,
+          "bits": 8,
+          "model_bytes": 4732,
+          "complete_file_bytes": 414372,
+          "model_sha256": "a2b5cff9647736c2be409f1b431294cf597cefa6a0942ce60c1e1e06b9d2e9e5",
+          "file_sha256": "41b42b1b4514400ad89a6cacac70c4f908e23dc950d921e8217153907dcfd07b",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 32,
+          "bits": 16,
+          "model_bytes": 16483,
+          "complete_file_bytes": 424054,
+          "model_sha256": "1bfb80a00a5a186f558fc2d201e6510e1fc29cd87182d9e3df3f2341545b3152",
+          "file_sha256": "6688bb53f5a5473605f8c06461641aec0a4c3300b9a7a2ec32837806eb4114e3",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 32,
+          "bits": 12,
+          "model_bytes": 14235,
+          "complete_file_bytes": 421809,
+          "model_sha256": "7f2e5567dbd2491ce36fc8e6c74bd3220b4514fe428410e7c36649bc72c32888",
+          "file_sha256": "45aea420298f1478b82f89192cf687db59a468f01f8b16f6e882d0734f26f39e",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 32,
+          "bits": 10,
+          "model_bytes": 12121,
+          "complete_file_bytes": 419724,
+          "model_sha256": "49f33b0427b57b1de3702ba7e13338db3b5ced22a72964e6828c19f090d686f2",
+          "file_sha256": "7c23d09173ab75bb07a0b3b82c110632baa2ea3bdffaadf7b98009e73cc724f7",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 32,
+          "bits": 8,
+          "model_bytes": 9707,
+          "complete_file_bytes": 417777,
+          "model_sha256": "085e1da15a8ba371c83f3615e55312c5421b8a763121a6b1e6c74e1cc1d7bba7",
+          "file_sha256": "b02f269a6879f7d5892573497d939c1c183f3ad4657e394fb12e3c6e3887059e",
+          "exact_rgb": true
+        }
+      ],
+      "exact_rgba": true,
+      "learned_skipped": null,
+      "seconds": 193.841185999976,
+      "warning": "Experimental multi-format tool, not the default scodec command or a stable release. The floor is a complete wrapped SCDX, not an unwrapped oracle. Torch training seeds global RNGs and is intended for CLI use.",
+      "baselines": {
+        "jxl-lossless-e9": 439556,
+        "png": 495403,
+        "webp-lossless": 430880
+      },
+      "file_sha256": "41b42b1b4514400ad89a6cacac70c4f908e23dc950d921e8217153907dcfd07b",
+      "source_pixel_sha256": "d73404e8597736872ecc55cf23fd806e9c870db9431fdfa1c3ce08ee4858ec8f"
+    },
+    {
+      "image": "2.1.08.png",
+      "source_sha256": "5d79f45703db5f5ada925643d0e9f8b4a0f8d6fcd15d07be64a74e472acfafd8",
+      "rgba_sha256": "142c4ab348e5691cf8c3de8d5a52fee3e25e1efbbdd3916e39551c74790f8e87",
+      "complete_file_bytes": 448833,
+      "selected": {
+        "format": "nnex-v2",
+        "hidden": 16,
+        "bits": 8,
+        "model_bytes": 4849
+      },
+      "candidates": [
+        {
+          "format": "scdx",
+          "codec": "jxl-lossless",
+          "complete_file_bytes": 465346
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 16,
+          "bits": 16,
+          "model_bytes": 7171,
+          "complete_file_bytes": 450749,
+          "model_sha256": "db73b4170dcdf96aa8cf1b2f58a054487ce29daf812b9516496eb0703bbf56e2",
+          "file_sha256": "fc7a9e9720527fb61c5f0125edd13bcd7237dfe481fcce0a8e861b50d5bf2903",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 16,
+          "bits": 12,
+          "model_bytes": 6482,
+          "complete_file_bytes": 450022,
+          "model_sha256": "a76b82b1c107e77a16bd32665b8f3d0f38a0e85152004c70a71e4b51ae580dbb",
+          "file_sha256": "77cb243bed1763125d923e0f124f1a238ba58b63220b112da0dc45415478601b",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 16,
+          "bits": 10,
+          "model_bytes": 5814,
+          "complete_file_bytes": 449395,
+          "model_sha256": "46788564d37a5e2e1952de00c1e8d78b5413f1a41ad5be77e0088c002c10db10",
+          "file_sha256": "f6b1c58a050eba374e11eb74fdc48f2dca316d03ce7e481c89400881f6628d14",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 16,
+          "bits": 8,
+          "model_bytes": 4849,
+          "complete_file_bytes": 448833,
+          "model_sha256": "31931bbc4405a8a330f6da700afb0fe9486000c0f69bf605ea4e8fc56104e160",
+          "file_sha256": "9003f9977fe15427437aac6115cf615e707a80770cfdfa8c91f9dd2d86ff3d87",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 32,
+          "bits": 16,
+          "model_bytes": 16484,
+          "complete_file_bytes": 459284,
+          "model_sha256": "dbf40135f20cc5c70d166a2304160074e3d18043e2ae23d74b38e97e8591efc9",
+          "file_sha256": "cf1cb15f4c4a4225d671b6759f05fa6462c62094af044dcb23fe2c00105439b2",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 32,
+          "bits": 12,
+          "model_bytes": 14638,
+          "complete_file_bytes": 457444,
+          "model_sha256": "ae214897f3f9331d99f40d9cd3430c708d8c49bc4483c18a680a974d3def50db",
+          "file_sha256": "703b2d498515e55e6b114b4d32aad88808ae0000fbf0341174394731b901bb7d",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 32,
+          "bits": 10,
+          "model_bytes": 12823,
+          "complete_file_bytes": 455631,
+          "model_sha256": "b74f4e6bce0291e500e5046ea8d5eaf9c23afbd505dc034001d3ce059bfca6e4",
+          "file_sha256": "b37dd0ca04c5db095c7c7d1ed648b332b6094c42cd13d42611d7f042d4707c38",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 32,
+          "bits": 8,
+          "model_bytes": 10358,
+          "complete_file_bytes": 453224,
+          "model_sha256": "29ade83c9c521422c9ab4a27a40fecba1ba2ee3ec79d94f990de5d4d058bd6f8",
+          "file_sha256": "909aaf27e7d723d48bb7e26f742ac9943be8cf3db10128255451be603c97bb10",
+          "exact_rgb": true
+        }
+      ],
+      "exact_rgba": true,
+      "learned_skipped": null,
+      "seconds": 170.66219133301638,
+      "warning": "Experimental multi-format tool, not the default scodec command or a stable release. The floor is a complete wrapped SCDX, not an unwrapped oracle. Torch training seeds global RNGs and is intended for CLI use.",
+      "baselines": {
+        "jxl-lossless-e9": 465018,
+        "png": 484111,
+        "webp-lossless": 468736
+      },
+      "file_sha256": "9003f9977fe15427437aac6115cf615e707a80770cfdfa8c91f9dd2d86ff3d87",
+      "source_pixel_sha256": "cc9239a566040982c4feccc7d987430fec29d6cd34045ba836c9d56521ba4ada"
+    },
+    {
+      "image": "2.1.09.png",
+      "source_sha256": "69ca0f150eea0673d03b586010cea44bc8b9e6d0ebeebfe91eb8e7fb937dc46c",
+      "rgba_sha256": "75feb7d01ba413fd71b617004ba4335c3888b2ddc78b6f9e373247ba81410229",
+      "complete_file_bytes": 412684,
+      "selected": {
+        "format": "nnex-v2",
+        "hidden": 16,
+        "bits": 8,
+        "model_bytes": 4965
+      },
+      "candidates": [
+        {
+          "format": "scdx",
+          "codec": "webp-lossless",
+          "complete_file_bytes": 427141
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 16,
+          "bits": 16,
+          "model_bytes": 7168,
+          "complete_file_bytes": 414592,
+          "model_sha256": "623aabf48f113a567a7b488f53a9e572f67005dc07823814098ff1a458b02334",
+          "file_sha256": "11a16b297aa99f1cff125ca550b233d170623bec96a77d6ad4a4d7490fa95958",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 16,
+          "bits": 12,
+          "model_bytes": 6485,
+          "complete_file_bytes": 413918,
+          "model_sha256": "a4d29e3988352b2a8c8fde288b1f8c40513b25fe1041ff064de48a48ef904a38",
+          "file_sha256": "aad0803c904aabe2ff612804568fcc7eb82d497817908cf9890363ef831ef294",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 16,
+          "bits": 10,
+          "model_bytes": 5824,
+          "complete_file_bytes": 413201,
+          "model_sha256": "2d4df61b20c2292ab1b74401e30eb2b0d58a4676fc3c78e5722150002db5dc0c",
+          "file_sha256": "c4d2231e0218356f1e45a23af2c4d15fd8a1befdcdfe7c2b02777cccc02aba8b",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 16,
+          "bits": 8,
+          "model_bytes": 4965,
+          "complete_file_bytes": 412684,
+          "model_sha256": "f6f8458e674fecfdc44eef8ce55ac804a6ffc1a8afe037caeb8789e3a4cbbd24",
+          "file_sha256": "8b0b89946e5539fd0eb81dd29af901073ee37f7b2d45a6332d0b4710805b92f5",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 32,
+          "bits": 16,
+          "model_bytes": 16479,
+          "complete_file_bytes": 422992,
+          "model_sha256": "7eda9ba0bebd211617e23e55672a7d78e7584dc207785e1df200dc56e9a9e11a",
+          "file_sha256": "1b1d8702f856d4d58182e15d244d8fb8b76829943ccbe2da0025bf6657052946",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 32,
+          "bits": 12,
+          "model_bytes": 14475,
+          "complete_file_bytes": 420987,
+          "model_sha256": "1f1c5b9a5726cd0bf027955e4e6be938ab5d7f765785604ebbcb97f8996c54af",
+          "file_sha256": "a31a743e4f927698a62ee282717c314d5d94767c18465858f0e63257f54f0b96",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 32,
+          "bits": 10,
+          "model_bytes": 12591,
+          "complete_file_bytes": 419107,
+          "model_sha256": "f1469d923192f1470f8ae7c19854ec91eaf53c854e980e6bd5fac41008275101",
+          "file_sha256": "e8d0f157c0cc434d70a315bd1be9a7128f0a196fc20adb521ab88b9fbf43cb24",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 32,
+          "bits": 8,
+          "model_bytes": 10240,
+          "complete_file_bytes": 417067,
+          "model_sha256": "a0963aff183075d6aeb1519ddf9074c98da8ffacc8212031e7fd88786e59a402",
+          "file_sha256": "b7359bcd0c5c76496ae134275e9780d0dc13b2bb8195f29a1acba5c1861d380e",
+          "exact_rgb": true
+        }
+      ],
+      "exact_rgba": true,
+      "learned_skipped": null,
+      "seconds": 174.77449741703458,
+      "warning": "Experimental multi-format tool, not the default scodec command or a stable release. The floor is a complete wrapped SCDX, not an unwrapped oracle. Torch training seeds global RNGs and is intended for CLI use.",
+      "baselines": {
+        "jxl-lossless-e9": 432282,
+        "png": 463876,
+        "webp-lossless": 426812
+      },
+      "file_sha256": "8b0b89946e5539fd0eb81dd29af901073ee37f7b2d45a6332d0b4710805b92f5",
+      "source_pixel_sha256": "956d855a1957d78810e8b254700292ac4f4c4dfbd40a4388fc05ea8efedbd120"
+    },
+    {
+      "image": "2.1.10.png",
+      "source_sha256": "e14215139d654fa9f6a66ff2b01e325b118802a40261e2e9a40046ec73b4ba50",
+      "rgba_sha256": "8ffcdbc63eb09bc01beca8c7735d28a330b7bf773696e16b19a0d2564b48b5f0",
+      "complete_file_bytes": 441010,
+      "selected": {
+        "format": "nnex-v2",
+        "hidden": 16,
+        "bits": 8,
+        "model_bytes": 4740
+      },
+      "candidates": [
+        {
+          "format": "scdx",
+          "codec": "jxl-lossless",
+          "complete_file_bytes": 461104
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 16,
+          "bits": 16,
+          "model_bytes": 7186,
+          "complete_file_bytes": 442699,
+          "model_sha256": "5ad7d737e59e20fce847d528605f2104e1519d30d092a48361d459810a39d15b",
+          "file_sha256": "143cb8ac27b4383803658c4147bc6d5c3df0b42db66dd9e96d5cba29f9862b89",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 16,
+          "bits": 12,
+          "model_bytes": 6435,
+          "complete_file_bytes": 441953,
+          "model_sha256": "7178923e3abe3f2710264a56bfde549ba53e186806f8a366ba1cdb6721d6c16b",
+          "file_sha256": "dca4710720bde6e32264917c5ba3e2ada6fda49371b76dfa15e54510a51f319f",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 16,
+          "bits": 10,
+          "model_bytes": 5680,
+          "complete_file_bytes": 441244,
+          "model_sha256": "2debf5eb48fef41cacba5be158b677c2bbd74dfc09580fc5af3c2ae42b05d377",
+          "file_sha256": "8bdfd361ef948e436985075a6b192bee2b88b7b02a99ae3da047b7e65cea4129",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 16,
+          "bits": 8,
+          "model_bytes": 4740,
+          "complete_file_bytes": 441010,
+          "model_sha256": "24505fb5eb8518fc744aa08ed0c172a953b6abb106f7858ac721e53e23f03344",
+          "file_sha256": "4575eeb82ff9cd6cd9d4d40d873b4a4cbcb5b03d5ab70bad5b1bea582da7f43d",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 32,
+          "bits": 16,
+          "model_bytes": 16476,
+          "complete_file_bytes": 450617,
+          "model_sha256": "79f92ebdaadd1f37a11f39e3309d94200b26f9904037d800c2d11a49d3d64958",
+          "file_sha256": "acc1a185cb4cd08d2f102cf5b2cb2cad4de7be6129edfe2711a4a756036ad181",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 32,
+          "bits": 12,
+          "model_bytes": 14433,
+          "complete_file_bytes": 448581,
+          "model_sha256": "f15acf181d87100ce737b4c2f11e1b7e493e5098d25c840bedccfb5af5472065",
+          "file_sha256": "6f0dc6eba219e21391e4a1859540ebc29f94c32dba36edaf783914598c738bc9",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 32,
+          "bits": 10,
+          "model_bytes": 12557,
+          "complete_file_bytes": 446725,
+          "model_sha256": "8cbccfedb9668c605590681f25375503be022f79b73715b087598ae5b3ed7344",
+          "file_sha256": "eeb8cbc9710df25556c3f1a6dea8bce4ff4710534261350201662359c2bfd350",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 32,
+          "bits": 8,
+          "model_bytes": 10024,
+          "complete_file_bytes": 444429,
+          "model_sha256": "a09e3a59a3124fba6a0a2d5dd81dc8e809f729dfb6aa9730da6449a453f79e44",
+          "file_sha256": "84193f097188f033e9b46113052027e49edd7a0fc5dec4f1267eff2a0d30feb4",
+          "exact_rgb": true
+        }
+      ],
+      "exact_rgba": true,
+      "learned_skipped": null,
+      "seconds": 182.67105599999195,
+      "warning": "Experimental multi-format tool, not the default scodec command or a stable release. The floor is a complete wrapped SCDX, not an unwrapped oracle. Torch training seeds global RNGs and is intended for CLI use.",
+      "baselines": {
+        "jxl-lossless-e9": 460776,
+        "png": 527799,
+        "webp-lossless": 465374
+      },
+      "file_sha256": "4575eeb82ff9cd6cd9d4d40d873b4a4cbcb5b03d5ab70bad5b1bea582da7f43d",
+      "source_pixel_sha256": "9742c31a5a45cc53305e64d75fb2aff4a833abccffb22fcd1db494ea6cfe6994"
+    },
+    {
+      "image": "2.1.11.png",
+      "source_sha256": "a7dfcf65235aa5505b35aad1deb37c2df37be1e894af8500d72459a8d07cf827",
+      "rgba_sha256": "1478133181404501135d8eb7c5e0f9768fdd3fd01d744e45ec4dc098ed203ebc",
+      "complete_file_bytes": 432280,
+      "selected": {
+        "format": "nnex-v2",
+        "hidden": 16,
+        "bits": 8,
+        "model_bytes": 4699
+      },
+      "candidates": [
+        {
+          "format": "scdx",
+          "codec": "jxl-lossless",
+          "complete_file_bytes": 452432
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 16,
+          "bits": 16,
+          "model_bytes": 7184,
+          "complete_file_bytes": 433937,
+          "model_sha256": "05e9b57d6295a43b80304a330b120e5aa842f8b8a2b98662723000fb25287534",
+          "file_sha256": "36c80641a40371c354e7139200c0dbcc891314b93c8b780c64c568086a7ff55e",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 16,
+          "bits": 12,
+          "model_bytes": 6424,
+          "complete_file_bytes": 433151,
+          "model_sha256": "81135d045991a796f2b45532838d2628ce216fafeefcc4dbf4f63b96c61fb193",
+          "file_sha256": "683693a03f2fc712e1ec0ca2f98bac5a1c8de4b0da86c4647e73ab8f663c0a0a",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 16,
+          "bits": 10,
+          "model_bytes": 5672,
+          "complete_file_bytes": 432635,
+          "model_sha256": "a4ac504cbe70170db9983e01fdf66296b693910ead0eab095196aca18c177631",
+          "file_sha256": "6f64a42e77af7e3d0fda7610041aacd87516093db54208edeab7856151993efb",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 16,
+          "bits": 8,
+          "model_bytes": 4699,
+          "complete_file_bytes": 432280,
+          "model_sha256": "d80715aa67c5023255ae0f416a47bcf94dff8c8134a0c7ee49c7981a79d10bcc",
+          "file_sha256": "8731d3568af68a04a93c06b9732755ff64d1dfec15e7478b7e55d16ec9334933",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 32,
+          "bits": 16,
+          "model_bytes": 16498,
+          "complete_file_bytes": 441979,
+          "model_sha256": "6118d7c9403d78afe80f20d00abcdf47581b24b03e8b6797504e4070e3df7020",
+          "file_sha256": "847ba015bf5979a794831ab10b5c1d7f6c9e97ee9d3327738834511f298747a3",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 32,
+          "bits": 12,
+          "model_bytes": 14602,
+          "complete_file_bytes": 440090,
+          "model_sha256": "4819ea259d3876255c5f9126d16806c6449d74785e0c06ad8c4074be2ac47f17",
+          "file_sha256": "a035fa1fa8eeb4a9e671a94777d8f4e98612a57af42d47fad46151110124de92",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 32,
+          "bits": 10,
+          "model_bytes": 12776,
+          "complete_file_bytes": 438233,
+          "model_sha256": "c7b0a97757991839cbd868b4880b0e5167efced8bbf2cc2017019324df8a595e",
+          "file_sha256": "adb83e28fec5e2f556d508c8ccd1ad2dfafd11dc86e911b28b91ccb45f24e3e3",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 32,
+          "bits": 8,
+          "model_bytes": 10494,
+          "complete_file_bytes": 437086,
+          "model_sha256": "6f62ba58763621f487505eda6ffaac59db68d66d1ac8fc94e4dea828a61f1307",
+          "file_sha256": "0fd87bd1848c416f96aa4f1d799ec6880c0e31b0fc9cabe26e1170d7e3168105",
+          "exact_rgb": true
+        }
+      ],
+      "exact_rgba": true,
+      "learned_skipped": null,
+      "seconds": 192.5292790000094,
+      "warning": "Experimental multi-format tool, not the default scodec command or a stable release. The floor is a complete wrapped SCDX, not an unwrapped oracle. Torch training seeds global RNGs and is intended for CLI use.",
+      "baselines": {
+        "jxl-lossless-e9": 452104,
+        "png": 494305,
+        "webp-lossless": 457290
+      },
+      "file_sha256": "8731d3568af68a04a93c06b9732755ff64d1dfec15e7478b7e55d16ec9334933",
+      "source_pixel_sha256": "e49cdf384b76ea947b76bc805c74bced1e70670b1ad284ce1bd8dbe92e41c53d"
+    },
+    {
+      "image": "2.1.12.png",
+      "source_sha256": "2b4bb0e1e2657ff89f321b62dea67d9a39da93d7bda003ab6ed46e68f2a3bc16",
+      "rgba_sha256": "b6a15890c9f1790152dcc8cdd1b758ff727e887f71e5ece89f42e4e2cf9700d4",
+      "complete_file_bytes": 422722,
+      "selected": {
+        "format": "nnex-v2",
+        "hidden": 16,
+        "bits": 8,
+        "model_bytes": 5034
+      },
+      "candidates": [
+        {
+          "format": "scdx",
+          "codec": "jxl-lossless",
+          "complete_file_bytes": 440388
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 16,
+          "bits": 16,
+          "model_bytes": 7177,
+          "complete_file_bytes": 424668,
+          "model_sha256": "2761dba681ce1332c55494a1fe97d1f7706f72b18209e31094a280fbdb819921",
+          "file_sha256": "ff90a247ca742b70ab62f3ba50671b85e0887d302b8e2cd83c0b04b5a44b86d2",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 16,
+          "bits": 12,
+          "model_bytes": 6513,
+          "complete_file_bytes": 424007,
+          "model_sha256": "8f1f6b63c9691a3b382ad674bfaf69b95280a91177227c86cdb7703a09f556ad",
+          "file_sha256": "ac846eaf05b49b57a921b4b5bf3eb208501ef433b87dfb68320a1dfb822e1f20",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 16,
+          "bits": 10,
+          "model_bytes": 5886,
+          "complete_file_bytes": 423385,
+          "model_sha256": "f3d9dfa8733b4b159c8f04690668c71cbb5d2c9bb280708327db61b24a75d0aa",
+          "file_sha256": "bd2d6341f73ae3b6b20dcd3cf298b6f328b3b83d06c91b57640bb9f08442eb91",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 16,
+          "bits": 8,
+          "model_bytes": 5034,
+          "complete_file_bytes": 422722,
+          "model_sha256": "51da2d675e66ee9020e005f53201291ca76daf7ce7cbf4554308a5a3e9d0f5d9",
+          "file_sha256": "a2b926308e921eccc7fe51b55596e4f0785118a481c6951ab0189ba329da71c3",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 32,
+          "bits": 16,
+          "model_bytes": 16484,
+          "complete_file_bytes": 432680,
+          "model_sha256": "92a9d9fa85960413d3c146e08cc36984b07ce04b6008d1cb374545eab132329b",
+          "file_sha256": "2aa1083d1889b4e1415654bae9963d7a0dbc323e28b165fc6751266427253587",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 32,
+          "bits": 12,
+          "model_bytes": 14500,
+          "complete_file_bytes": 430693,
+          "model_sha256": "194bc22a9aa393e088ba86856099ce3f5173f63900f4e755ff91a7c8ec2f064f",
+          "file_sha256": "147d8038a79a36b920be55f3462d49a636327bf0f472fcb002afc36850434353",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 32,
+          "bits": 10,
+          "model_bytes": 12692,
+          "complete_file_bytes": 428900,
+          "model_sha256": "f2c164ec9f26895328b41428beeafd6e4e57372acd5d62645651e4a7f2ee4c48",
+          "file_sha256": "3ed1aa1e80f2629f4e0d30e2d7b57a3883846e479a7e2856d2482240b21eb962",
+          "exact_rgb": true
+        },
+        {
+          "format": "nnex-v2",
+          "hidden": 32,
+          "bits": 8,
+          "model_bytes": 10464,
+          "complete_file_bytes": 426805,
+          "model_sha256": "a9fb2aeddd6ea8f411ba33cf1bab3669da603d8872d72d0e7df1c840b5cb9f95",
+          "file_sha256": "d9a5277c070fd794f54596ed8d3673103c1de2c077b7d0d80175dc10cd627a03",
+          "exact_rgb": true
+        }
+      ],
+      "exact_rgba": true,
+      "learned_skipped": null,
+      "seconds": 171.65112766699167,
+      "warning": "Experimental multi-format tool, not the default scodec command or a stable release. The floor is a complete wrapped SCDX, not an unwrapped oracle. Torch training seeds global RNGs and is intended for CLI use.",
+      "baselines": {
+        "jxl-lossless-e9": 440060,
+        "png": 508082,
+        "webp-lossless": 452092
+      },
+      "file_sha256": "a2b926308e921eccc7fe51b55596e4f0785118a481c6951ab0189ba329da71c3",
+      "source_pixel_sha256": "46004c94df8ac538320ee17a8e05c34bc0cf2d4ced61683677a820fcfbc5fafe"
+    }
+  ],
+  "cross_isa": {
+    "complete": true,
+    "native_architecture": "arm64",
+    "native_backend_sha256": "80f2e77dc355eeda6d5e6f9ec7237fbfe0796c59427d7f65a37e8387fe400620",
+    "alternate_backend_sha256": "89fcb5abc0403dec5fbcafaa43cd7878b5d94c60a7fbf37487d3884a70a35114",
+    "warning": "Two executable builds on one host, not independent physical machines.",
+    "images": [
+      {
+        "file": "aerial-2.1.01.coded",
+        "file_sha256": "4393bb659ccd7c647595ba0be0e81fca7528ffbb7e17b3293700da0717d471e3",
+        "pixel_sha256": "2946c84208dde9e700fce6a7babd5dc98619a10a50b36d04677df23af98b577f",
+        "exact_rgb": true,
+        "identical_encoded_bytes": true
+      },
+      {
+        "file": "aerial-2.1.02.coded",
+        "file_sha256": "5f9e1af97b747a438af1d08dd352206ec40c1bdc3c38ff1ce12cff9c471ba6c2",
+        "pixel_sha256": "d5deb514398760f3153fe742c2bff23b48625ddccf10cae3015129b06569a917",
+        "exact_rgb": true,
+        "identical_encoded_bytes": true
+      },
+      {
+        "file": "aerial-2.1.03.coded",
+        "file_sha256": "05364dec837489e20533c1268125280206912edb54ffaddd8e652aca596949e4",
+        "pixel_sha256": "2193153fe9433c342ebeb930bc6e5b44352697cb6cf67cfe8fb4f9cba7cc5601",
+        "exact_rgb": true,
+        "identical_encoded_bytes": true
+      },
+      {
+        "file": "aerial-2.1.04.coded",
+        "file_sha256": "a08714340391bb3ed64faf2a902474bf92dee1d785332281cc61d2c017170a72",
+        "pixel_sha256": "2e7b94055ab1c39f77a97f5512b3055e69ba1193ceab214a34901a3555ff5194",
+        "exact_rgb": true,
+        "identical_encoded_bytes": true
+      },
+      {
+        "file": "aerial-2.1.05.coded",
+        "file_sha256": "e606b10f6528ca51b61a2b837d0169277495d30b8e00d0d0ccb91a0ada838639",
+        "pixel_sha256": "e21bcd2d1e76393a0a46123efff2791792986d5ef26f69a9fb3e3ffb86747c22",
+        "exact_rgb": true,
+        "identical_encoded_bytes": true
+      },
+      {
+        "file": "aerial-2.1.06.coded",
+        "file_sha256": "0f3f78202d58fcdc1cde42cc7531ea183dd028d8151f195ebb12843951ebab35",
+        "pixel_sha256": "06a375c3cbb3c9266971a97a13cfa7d71d15ee3334c4d3fee271fa34dfdfd51d",
+        "exact_rgb": true,
+        "identical_encoded_bytes": true
+      },
+      {
+        "file": "aerial-2.1.07.coded",
+        "file_sha256": "41b42b1b4514400ad89a6cacac70c4f908e23dc950d921e8217153907dcfd07b",
+        "pixel_sha256": "d73404e8597736872ecc55cf23fd806e9c870db9431fdfa1c3ce08ee4858ec8f",
+        "exact_rgb": true,
+        "identical_encoded_bytes": true
+      },
+      {
+        "file": "aerial-2.1.08.coded",
+        "file_sha256": "9003f9977fe15427437aac6115cf615e707a80770cfdfa8c91f9dd2d86ff3d87",
+        "pixel_sha256": "cc9239a566040982c4feccc7d987430fec29d6cd34045ba836c9d56521ba4ada",
+        "exact_rgb": true,
+        "identical_encoded_bytes": true
+      },
+      {
+        "file": "aerial-2.1.09.coded",
+        "file_sha256": "8b0b89946e5539fd0eb81dd29af901073ee37f7b2d45a6332d0b4710805b92f5",
+        "pixel_sha256": "956d855a1957d78810e8b254700292ac4f4c4dfbd40a4388fc05ea8efedbd120",
+        "exact_rgb": true,
+        "identical_encoded_bytes": true
+      },
+      {
+        "file": "aerial-2.1.10.coded",
+        "file_sha256": "4575eeb82ff9cd6cd9d4d40d873b4a4cbcb5b03d5ab70bad5b1bea582da7f43d",
+        "pixel_sha256": "9742c31a5a45cc53305e64d75fb2aff4a833abccffb22fcd1db494ea6cfe6994",
+        "exact_rgb": true,
+        "identical_encoded_bytes": true
+      },
+      {
+        "file": "aerial-2.1.11.coded",
+        "file_sha256": "8731d3568af68a04a93c06b9732755ff64d1dfec15e7478b7e55d16ec9334933",
+        "pixel_sha256": "e49cdf384b76ea947b76bc805c74bced1e70670b1ad284ce1bd8dbe92e41c53d",
+        "exact_rgb": true,
+        "identical_encoded_bytes": true
+      },
+      {
+        "file": "aerial-2.1.12.coded",
+        "file_sha256": "a2b926308e921eccc7fe51b55596e4f0785118a481c6951ab0189ba329da71c3",
+        "pixel_sha256": "46004c94df8ac538320ee17a8e05c34bc0cf2d4ced61683677a820fcfbc5fafe",
+        "exact_rgb": true,
+        "identical_encoded_bytes": true
+      }
+    ],
+    "scdx_skipped": []
+  },
+  "independent_decode_observations": {
+    "scope": "Sequential post-training single observations on this Mac, not statistically stable latency measurements. NNEX includes subprocess/config/temp-file overhead; JXL uses its native in-process decoder. Both return RGBA; baseline encoding excluded.",
+    "median_nnex_decode_s": 0.691199749999214,
+    "median_jxl_decode_s": 0.04667710396461189,
+    "torch_imported": false,
+    "images": [
+      {
+        "image": "2.1.01.png",
+        "nnex_decode_s": 0.6576816249871626,
+        "jxl_decode_s": 0.05109495797660202,
+        "rgba_sha256": "1b5a80d2c5ac754f8a65527cd6727e09f49c024dcfd27441097eac6adbb4bc62",
+        "file_sha256": "4393bb659ccd7c647595ba0be0e81fca7528ffbb7e17b3293700da0717d471e3"
+      },
+      {
+        "image": "2.1.02.png",
+        "nnex_decode_s": 0.7328705840045586,
+        "jxl_decode_s": 0.05101920902961865,
+        "rgba_sha256": "70ef665cb74160828e06e2c03aa6fb64bea019062c90653c5ba4c74a16f19646",
+        "file_sha256": "5f9e1af97b747a438af1d08dd352206ec40c1bdc3c38ff1ce12cff9c471ba6c2"
+      },
+      {
+        "image": "2.1.03.png",
+        "nnex_decode_s": 0.7147194580174983,
+        "jxl_decode_s": 0.046366582973860204,
+        "rgba_sha256": "90ae4c83bb246107385bda352cb3bdeb4f2a8c41380f09cf7dfdf5d49e73397a",
+        "file_sha256": "05364dec837489e20533c1268125280206912edb54ffaddd8e652aca596949e4"
+      },
+      {
+        "image": "2.1.04.png",
+        "nnex_decode_s": 0.7225226669688709,
+        "jxl_decode_s": 0.042212250002194196,
+        "rgba_sha256": "d0f9fde7aa7edba5d8506dc8a0b8f94fd84cb934c8c9c3682c6d3f8d5b0839a9",
+        "file_sha256": "a08714340391bb3ed64faf2a902474bf92dee1d785332281cc61d2c017170a72"
+      },
+      {
+        "image": "2.1.05.png",
+        "nnex_decode_s": 0.7394515000050887,
+        "jxl_decode_s": 0.04736537497956306,
+        "rgba_sha256": "bb7f03cf16be71cf876338a33e95380c9ac582a627da3c97772b654d99c93e65",
+        "file_sha256": "e606b10f6528ca51b61a2b837d0169277495d30b8e00d0d0ccb91a0ada838639"
+      },
+      {
+        "image": "2.1.06.png",
+        "nnex_decode_s": 0.7243827499914914,
+        "jxl_decode_s": 0.047691125015262514,
+        "rgba_sha256": "212d54288ed0069cc9f8787257d80ce9aa9261c63a83be6d0baad06b6ad46d77",
+        "file_sha256": "0f3f78202d58fcdc1cde42cc7531ea183dd028d8151f195ebb12843951ebab35"
+      },
+      {
+        "image": "2.1.07.png",
+        "nnex_decode_s": 0.6732873750152066,
+        "jxl_decode_s": 0.04826520796632394,
+        "rgba_sha256": "9d70baaa60d484ab9c9646ee45628f39509619ee7b46f0c2e4e152b595688d0d",
+        "file_sha256": "41b42b1b4514400ad89a6cacac70c4f908e23dc950d921e8217153907dcfd07b"
+      },
+      {
+        "image": "2.1.08.png",
+        "nnex_decode_s": 0.6892547910101712,
+        "jxl_decode_s": 0.037720207998063415,
+        "rgba_sha256": "142c4ab348e5691cf8c3de8d5a52fee3e25e1efbbdd3916e39551c74790f8e87",
+        "file_sha256": "9003f9977fe15427437aac6115cf615e707a80770cfdfa8c91f9dd2d86ff3d87"
+      },
+      {
+        "image": "2.1.09.png",
+        "nnex_decode_s": 0.6739717920427211,
+        "jxl_decode_s": 0.04698762495536357,
+        "rgba_sha256": "75feb7d01ba413fd71b617004ba4335c3888b2ddc78b6f9e373247ba81410229",
+        "file_sha256": "8b0b89946e5539fd0eb81dd29af901073ee37f7b2d45a6332d0b4710805b92f5"
+      },
+      {
+        "image": "2.1.10.png",
+        "nnex_decode_s": 0.6931447089882568,
+        "jxl_decode_s": 0.044114874966908246,
+        "rgba_sha256": "8ffcdbc63eb09bc01beca8c7735d28a330b7bf773696e16b19a0d2564b48b5f0",
+        "file_sha256": "4575eeb82ff9cd6cd9d4d40d873b4a4cbcb5b03d5ab70bad5b1bea582da7f43d"
+      },
+      {
+        "image": "2.1.11.png",
+        "nnex_decode_s": 0.6518723330227658,
+        "jxl_decode_s": 0.044499624986201525,
+        "rgba_sha256": "1478133181404501135d8eb7c5e0f9768fdd3fd01d744e45ec4dc098ed203ebc",
+        "file_sha256": "8731d3568af68a04a93c06b9732755ff64d1dfec15e7478b7e55d16ec9334933"
+      },
+      {
+        "image": "2.1.12.png",
+        "nnex_decode_s": 0.6796776669798419,
+        "jxl_decode_s": 0.038093999959528446,
+        "rgba_sha256": "b6a15890c9f1790152dcc8cdd1b758ff727e887f71e5ece89f42e4e2cf9700d4",
+        "file_sha256": "a2b926308e921eccc7fe51b55596e4f0785118a481c6951ab0189ba329da71c3"
+      }
+    ],
+    "current_source_sha256": {
+      "scripts/research/local_probability/compress.py": "fa523bb914b9ddc20d17023658b6a9142142d27ee4a7b8aa1defce656de885dd",
+      "scripts/research/local_probability/neural_probability_probe.py": "87ee4ea85b82f2f473149edd21c2531f8603b0bae8e0ec77b984edc2aef6bc7a",
+      "scripts/research/local_probability/predictor_probe.py": "d66523f309df448c2a70a7cc5305f7eb40ef65c272cc5a4b00a6081eb2cd68fb",
+      "scripts/research/local_probability/quantize_model.py": "1386aba3dd1afd7297c9ea70f010087af661b426e5980b73a1a1d16ae2938171",
+      "scripts/research/local_probability/neural_bitstream.py": "58f28d48055656a34c883cc3a4dee33f0c3f3a9be91c9573dea732b13f8a8b4b",
+      "scripts/research/local_probability/nnproto_integer.cpp": "ca3a11e9b329dff2e48efb48c1980c4ed009f55034723db085ab9dca77433b37",
+      "scripts/research/local_probability/arithmetic.hpp": "aceba08f6e4a4db4c0fb07b48ab74175fa75a266772b64c2ca829bf8cde6ac67",
+      "scripts/research/local_probability/input_image.py": "3a9da04c87a33608939dd142e8060adbddd6721a1837ce2e6b961078d6658315",
+      "scripts/research/local_probability/adaptive_validation.py": "b544ec7b36762c02a7c4e3c902aa09df452e1f41884ff4a13a14e09c94b956d5",
+      "src/semanticcodec/encode/pipeline.py": "e2c385ee6760e31dabda56ba2b8cc08cad974fc8f3d914b568097511a64f1eac",
+      "src/semanticcodec/encode/symbols.py": "dfba64e44e29bbc30749fc5f9c14d6bb67425611796669e3643e03a6f307208a",
+      "src/semanticcodec/fallback/codecs.py": "26645f86008acf9099d5b87cc91060aa170e5168059062b580d0768237c6c852"
+    }
+  },
+  "source_hash_scope": "Implementation files at receipt finalization, not a commit. Only CLI length guards, test/docs, cross-ISA tooling, and legacy-runner import safety changed during validation; no training, quantization, inference or selection rules changed.",
+  "limitations": [
+    "One native 512x512 aerial corpus, not broad all-image or large-resolution proof.",
+    "Baseline comparison covers measured PNG/WebP lossless and JXL effort9, not every codec or maximum JXL effort.",
+    "Training used three concurrent workers sharing MPS; per-image seconds are not isolated latency.",
+    "ARM64 and x86_64 under Rosetta on the same Mac, not two physical machines.",
+    "Experimental format, no production integration or comprehensive hostile-input audit.",
+    "Every selected model is transmitted and counted. Pixel samples are exact, not original file bytes or source metadata."
+  ]
+}

@@ -1,0 +1,328 @@
+# Image-local learned probability experiment
+
+Research code, **not a stable release or file format**.
+
+A small network predicts RGB sample probabilities. All image-local trained
+coefficients are transmitted with arithmetic-coded samples. A separate C++
+process decodes using only that file, without PyTorch, the source image,
+pretrained weights, external fonts, or other image-specific assets.
+
+This is established predictive/neural entropy coding, not a claim to have
+invented minimum-rate prediction or logistic mixtures. No third-party predictor
+or arithmetic-coder implementation was copied.
+
+## Current status
+
+- The original frozen width-32 model decoded all 14 fresh SIPI miscellaneous
+  images exactly. It won on six larger images but lost on eight smaller ones:
+  only **0.24% aggregate savings** against the measured bare PNG/WebP/JXL best.
+- Integer inference and a pixel checksum now replace floating inference by
+  default. All 17 original models produce identical encoded bytes on ARM64 and
+  x86_64 **under Rosetta on the same Mac**. This is not testing on two physical
+  machines or a broad portability certification.
+- Width/precision selection improves the **known-input regression**. Actual
+  cached neural candidates plus newly encoded SCDX floors total 3,088,562 bytes
+  on the 14 SIPI inputs, versus 3,240,758 bare-baseline bytes, with 9/14 wins.
+  This replay includes all selected model bytes, but excludes training from
+  timing. It is not a new holdout.
+- A separate **fresh** twelve-image native aerial cohort uses the frozen
+  [protocol](../../../docs/experiments/2026-10-23-neural-aerial-protocol.json).
+  The full encoder won **12/12**, 5,242,156 vs 5,508,321 bare-best bytes:
+  **4.83% aggregate / 4.43% median savings**, all RGBA exact. All eight learned
+  candidates per image independently decoded, and all twelve winners
+  cross-encoded identically under Rosetta.
+  [Full fresh receipt](../../../docs/results/2026-10-23-neural-aerial.json).
+- Round 2 (NNEX v3 model coding, far causal taps, four components, grouped
+  cosine training, tiling above 1 Mpx) used only known development images.
+  A separately frozen [Tecnick protocol](../../../docs/experiments/2026-10-24-tecnick-protocol.json)
+  then measured 24 fresh studio photographs: **24/24 wins**, 30,359,801 vs
+  40,308,146 best-baseline bytes, **24.68% aggregate / 24.01% median savings**
+  against PNG, WebP, and JPEG XL efforts 9 and 10. All samples were exact, and
+  all 24 files re-encoded identically under Rosetta. These images are very clean
+  (about 1.5 bits per sample), which inflates percentages relative to noisier
+  photos. [Durable summary](../../../docs/results/2026-10-24-tecnick.json).
+  Those 24 images have been development data since.
+- Round 3 (fused Metal trainer, per-column and per-row weight grids, input
+  pruning, two causal-window least-squares fits) was first measured at commit
+  `6c0131e` on a fresh cohort of 16 Tecnick crops and four 2400×2400 images
+  (`fetch_tecnick_fresh.py`, `fresh_validation.py`), and re-measured at
+  `a82b98a` and `da035fe` after changes tuned on development images only. At
+  `da035fe`, against JPEG XL effort 10, the best baseline on all 20, it saved
+  **28.83%** on the crops (16/16) and **23.27%** on the native images (4/4).
+  Against paq8px -9L it was 1.06% smaller on the crops (11/16 images) and 1.75%
+  smaller on the native images (4/4). All 20 files decoded exactly and
+  re-encoded identically under Rosetta.
+  [Durable summary](../../../docs/results/2026-10-27-tecnick-fresh-da035fe.json).
+- On the 107 images of the Lossless Photo Compression Benchmark (LPCB), never
+  used before, commit `299bc4c` came out **1.21%** smaller in total than
+  LPCB's published paq8px v216 -9L sizes (81/107 images), 3.28% smaller than
+  cmix v16 and 9.76% smaller than GraLIC 1.11. On the 62 camera photos it was
+  **3.91%** smaller than paq8px and **16.24%** smaller than JPEG XL effort 10,
+  the best standard baseline, and smaller than both on all 62; paq8px won 22
+  of the 25 non-star NASA images. All files decoded exactly. The re-run at
+  `2db19a3` codes each image as one file (the five largest as strips inside
+  it), one image at a time: 877,080,059 bytes, 54 s median encode and 9.1 s
+  median decode per camera photo.
+  [Notebook](../../../docs/experiments/2026-10-27-lpcb.md),
+  [durable summary](../../../docs/results/2026-10-28-lpcb-2db19a3.json),
+  [coded files](https://github.com/Karan-Gupta07/Overfit-NNEX/releases/tag/lpcb-2db19a3).
+
+All results are collected in [benchmarks](../../../docs/benchmarks.md).
+See [design](../../../docs/design/15-image-local-probability.md), notebooks for
+[round 1](../../../docs/experiments/2026-10-23-local-probability.md),
+[round 2](../../../docs/experiments/2026-10-24-neural-training.md) and
+[round 3](../../../docs/experiments/2026-10-26-fresh-tecnick.md), and
+[durable results](../../../docs/results/2026-10-23-local-probability.json).
+
+## Build
+
+From the repository root (use the project's Python 3.13 virtual environment):
+
+```bash
+pip install -e ".[ml,cv,hybrid,dev]"
+mkdir -p data/research-local-probability
+c++ -O3 -std=c++17 -Wall -Wextra -Werror -pthread \
+  scripts/research/local_probability/nnproto_integer.cpp \
+  -o data/research-local-probability/nnproto-integer
+```
+
+A C++17 compiler with signed/unsigned 128-bit integer extensions and
+`std::thread` is required.
+The `hybrid` extra supplies JPEG XL; `cwebp -lossless -z 9 -exact` supplies the
+strongest measured WebP floor. Record fallback behavior if `cwebp` is absent.
+PyTorch is needed only for training, not decoding.
+
+## Encode and decode with actual file competition
+
+```bash
+python scripts/research/local_probability/compress.py image.png \
+  --out data/probe/image.coded --receipt docs/results/raw/image.json
+python scripts/research/local_probability/compress.py data/probe/image.coded \
+  --decode --out data/probe/reconstructed.png
+```
+
+The output is the winning complete file, unchanged: either SCDX or integer
+NNEX v4 (`--envelope 3` writes v3). Older NNEX v2 and v3 files still decode.
+There is no extra selection envelope. Use this research decoder for NNEX
+outputs.
+
+Defaults: feature set 4 (twelve far causal taps, the plane's level, row, column
+and diagonal parity, and two causal-window least-squares fits, each with its
+spread and errors), four logistic components, and causal error context. The
+encoder gets the fits of the whole image once from `nnproto-integer local-fit`
+and reuses them for every complete file it codes, so the backend must be built
+before training with feature set 3 or 4.
+Hidden widths follow image size: 12 and 32 up to 1,000,000 pixels, 24 and 48 up
+to 4,000,000, and 48 above. Training runs 800 epochs, capped at 51,200 × 8192
+samples (73 epochs at 2400×2400), with Adam at 0.015, 5% warmup and cosine
+decay to a 1% floor, seed 20261023, four CPU threads, and MPS when available.
+Images up to 1,000,000 pixels use batch 4096, a per-plane clip norm of 30 and
+first-layer input pruning; larger ones use batch 8192, clip norm 10 and no
+pruning. The three color planes train together in one batched step with
+independent weights (`sequential=True` in `compress()` restores the older
+per-plane loop).
+
+With MPS, a fused Metal trainer runs the steps, then a quantization-aware
+snapshot on 12-bit grids. An estimated per-plane search picks each tensor's
+grid (one grid, or one per column or row) and codes the searched model
+as a complete file, plus the best uniform-grid model when its estimate is within
+0.05%. Parallel widths race: after a 32nd of their epochs only widths
+whose estimate (recent mean training bits plus 10-bit model bytes) is within
+3% of the best keep training. The PyTorch path (`--torch-training`)
+instead tries weight grids labelled 16/12/10/8/7/6 bits, in that order,
+stopping after the first file that grows. Every file is independently
+verified before it is kept. Quantized tensors are entropy-coded exact binary16
+values; these labels are **not literal packed-integer tensor formats**.
+
+Each width trains in its own spawned process while the parent builds the SCDX
+floor; `--serial` trains one at a time and writes the same bytes. The native
+backend evaluates encoder probabilities on all cores and decodes v4 files with
+a multithreaded row wavefront; `--threads N` caps both (0 chooses).
+`--compile-training` is faster on MPS but trains slightly different models, so
+it is a different encoder setting rather than a speedup of the default. On six
+known development images it cut encode time by about a third and changed the
+total size by −0.04% (−0.26% to +0.12% per image); see the
+[speed notebook](../../../docs/experiments/2026-10-25-encode-speed.md).
+
+Choose the smallest complete candidate against an actual balanced hybrid SCDX
+floor, no region partitioning. Ties retain the floor. A parallel fused encode
+of an image with at least 4,096 sampled colours first builds a JPEG XL effort
+7 floor and skips the full one when the learned models' first estimates are
+at least 10% smaller (`SCREEN_FLOOR` in `compress.py`). `--partition-depth 2`
+also enables the existing bounded spatial search. `--floor-only` skips training;
+`--no-hybrid` disables JPEG XL. `--without-floor` is diagnostic, not a guarantee.
+
+Only still, 8-bit RGB/RGBA inputs are accepted. Nonopaque images skip training
+and retain the conventional SCDX path, which preserves alpha and hidden RGB.
+Inputs are limited to 16,777,216 pixels and 64 MiB source files. Above the
+training budget (8,388,608 pixels for the fused trainer, 1,048,576 for
+PyTorch), training uses evenly spread 256×256 tiles (with six-pixel causal
+margins) up to that budget; every pixel is still coded.
+Supported source files are PNG, JPEG, TIFF, WebP, and BMP. Pixel losslessness
+does not preserve original file bytes, EXIF/ICC metadata, or animation; grayscale
+and higher bit depths are not accepted. Decoding is several times slower than
+JPEG XL, and encoding trains a network per image. On an otherwise idle M4 Pro
+the fresh Tecnick run took a median 8.6 s to encode a 512×512 crop and 40.0 s
+for a 2400×2400 image, and 0.18 s and 4.77 s to decode them. These are not
+statistically stable latency benchmarks.
+
+## Individual model and precision experiments
+
+```bash
+python scripts/research/local_probability/neural_probability_probe.py \
+  data/corpora/kodak/kodim01.png --epochs 400 --hidden 16 --mixtures 4 \
+  --causal-context --feature-set 1 --schedule cosine --lr 0.015 \
+  --out docs/results/raw/local-probability-development.json
+python scripts/research/local_probability/quantize_model.py \
+  data/corpora/kodak/kodim01.png \
+  --model docs/results/raw/local-probability-development-kodim01-model.nnm \
+  --out data/research-local-probability/kodim01-precision.json
+python scripts/research/local_probability/training_sweep.py \
+  data/corpora/kodak/kodim01.png --config g-lr15-e400 \
+  --work data/research-local-probability/sweep \
+  --out docs/results/raw/sweep-g-lr15-e400.json
+```
+
+The trainer writes a v3 model (`-model.nnm`) and, for feature set 0, a v2 CBOR
+model (`-model.cbor.zst`) that `neural_bitstream.py` can encode with baseline
+measurements. Training reports are entropy estimates, **not real file
+measurements**. The precision and sweep commands encode complete v3 files,
+independently decode them, and check exact RGB. Training is not promised
+byte-identical across GPU/runtime versions; deterministic decoding and
+re-encoding use the transmitted model.
+
+## Corpora and frozen validation
+
+```bash
+python scripts/research/local_probability/fetch_sipi_holdout.py
+# This cohort is now known; reruns are regressions, never fresh validation.
+python scripts/research/local_probability/neural_validation.py \
+  --out docs/results/raw/local-probability-sipi-regression.json
+
+python scripts/research/local_probability/fetch_sipi_aerial.py
+# Also known now; pins the aerial protocol's training settings.
+python scripts/research/local_probability/adaptive_validation.py \
+  --out docs/results/raw/local-probability-aerial.json
+
+python scripts/research/local_probability/fetch_tecnick.py
+python scripts/research/local_probability/tecnick_validation.py \
+  --cohort tecnick-crop512 --out docs/results/raw/tecnick-crop512.json
+python scripts/research/local_probability/tecnick_validation.py \
+  --cohort tecnick-2400 --out docs/results/raw/tecnick-2400.json
+
+python scripts/research/local_probability/fetch_tecnick_fresh.py --archive ARCHIVE.zip
+python scripts/research/local_probability/fresh_validation.py \
+  --cohort tecnick-fresh-crop512 \
+  --out docs/results/raw/local-probability-fs4-tecnick-fresh-crop512.json
+
+python scripts/research/local_probability/fetch_lpcb.py
+python scripts/research/local_probability/lpcb_validation.py \
+  --out docs/results/raw/lpcb.json --files data/lpcb-coded $(ls data/corpora/lpcb/ppm)
+python scripts/research/local_probability/verify_lpcb.py data/lpcb-coded
+python scripts/research/local_probability/lpcb_baselines.py \
+  --out docs/results/raw/lpcb-baselines.json
+```
+
+The first cohort is all 14 currently listed color miscellaneous images,
+excluding withdrawn images. The aerial cohort is all twelve currently listed
+native 512×512 color images, not the larger images. TIFF-to-PNG preserves every
+RGB sample. Downloaders bound archive size/expansion, never extract filesystem
+paths, and refuse changed existing images/manifests. Original assets stay under
+ignored `data/` and remain subject to their owners' rights.
+
+`fetch_tecnick.py` pins the TESTIMAGES 2400×2400 RGB archive by SHA-256. It
+selects two disjoint cohorts by sorted file name only: twelve native images
+(`tecnick-2400`) and twelve centered 512×512 crops of other images
+(`tecnick-crop512`). The images are CC BY-NC-SA 4.0 and are not
+redistributed. `tecnick_validation.py` follows the
+[frozen protocol](../../../docs/experiments/2026-10-24-tecnick-protocol.json);
+`--start` and `--limit` split a cohort across workers. Both cohorts are now
+known, so reruns are regressions.
+
+`fetch_tecnick_fresh.py` reads a local copy of the same archive and builds the
+fresh cohort from the 16 images the first two left unused: a centered 512×512
+crop of each (`tecnick-fresh-crop512`) and the full image of four of them
+(`tecnick-fresh-2400`). `fresh_validation.py` measures the committed default
+encoder on every image and refuses changed sources. It first ran at
+`6c0131e`; the cohort is known from then on, so later runs (`a82b98a`,
+`da035fe`) re-measure settings tuned elsewhere.
+
+`fetch_lpcb.py` downloads LPCB's original PPM archive (from the Wayback
+Machine), its MD5 list and its published per-image paq8px, cmix and GraLIC
+results, refuses any image whose MD5 differs, and keeps each PPM plus a
+manifest. It also writes PNG copies (images over the pixel limit as two or
+three horizontal strips), which the `299bc4c` receipts coded.
+`lpcb_validation.py` encodes and decodes the given PPMs, one file per image,
+and `--files` keeps each `<name>.coded`; workers sharing `--claims` split the
+list. `verify_lpcb.py` decodes a directory of those files, rebuilds each PPM
+and checks it against LPCB's MD5 sums. `lpcb_baselines.py` measures PNG, WebP
+lossless and JPEG XL effort 9 and 10 on the whole images, and
+`summarize_lpcb.py` joins everything per image and per set.
+`measure_checkout.py` measures another checkout's encoder, for example an old
+commit in a worktree.
+
+`replay_models.py` reproduces the specific existing known-input cache selection
+after the prerequisite raw receipts and precision artifacts have been generated.
+It recomputes the real SCDX floor, checks cache hashes and both decoders, but does
+not measure full cold-encoder runtime.
+
+## Numerical format and limits
+
+NNEX v3: six-byte magic, two little-endian uint32 lengths, 32-byte SHA-256 of
+row-major raw RGB, compact canonical model, arithmetic stream. NNEX v4 is
+identical except that the stream is split into up to 64 row substreams (row y
+in substream y mod S, default S = 16) behind a one-byte count and varint
+lengths, so rows can decode in parallel. The probabilities are the v3
+probabilities. The model
+transmits each fixed-shape tensor as raw binary16 or as Rice-coded integers on a
+power-of-two grid (one per tensor, column, or row) that decode to identical
+binary16 values. Model format 2 codes an all-zero column or row with one
+reserved grid shift; format 1 payloads still decode. V2 differs only in
+its zstd-compressed canonical CBOR model and lack of feature sets. The 46-byte
+header and all trained coefficients count in file size. The checksum detects
+corruption; it does **not authenticate** files.
+
+The backend uses integer Q24 guide/affine coefficients, Q16 neural operations,
+deterministic integer exponential tables, Q30 probabilities, and 20-bit CDFs.
+No `exp`/libm or floating inference runs in the v2/v3/v4 decoder. Model payloads
+are limited to 1 MiB (also 1 MiB expanded for v2); arithmetic streams are at most 128 MiB; model
+dimensions, tensor names/shapes, coefficient magnitudes, and positive CDF counts
+are checked. This is not a comprehensive hostile-input security audit or a
+hard process-level memory/CPU sandbox.
+
+The legacy floating v1 reference remains available only for historical work:
+
+```bash
+c++ -O3 -std=c++17 -Wall -Wextra -Werror -ffp-contract=off -fno-fast-math \
+  scripts/research/local_probability/nnproto.cpp \
+  -o data/research-local-probability/nnproto
+# neural_bitstream.py ... --float-reference
+```
+
+V1 lacks the v2 pixel checksum and normative integer arithmetic. Do not deploy
+it or assume cross-platform interoperability.
+
+On a Mac with Rosetta, the alternate-ISA check can be reproduced after generating
+validation outputs:
+
+```bash
+c++ -O3 -arch x86_64 -std=c++17 -Wall -Wextra -Werror -pthread \
+  scripts/research/local_probability/nnproto_integer.cpp \
+  -o data/research-local-probability/nnproto-integer-x86_64
+python scripts/research/local_probability/verify_cross_isa.py \
+  data/probe/tecnick-*.coded \
+  --binary data/research-local-probability/nnproto-integer-x86_64 \
+  --out docs/results/raw/neural-cross-isa-tecnick.json
+```
+
+It uses only each in-band model and decoded pixels. It verifies alternate
+decoding and byte-identical re-encoding; it does not retrain a model or establish
+two-machine coverage.
+
+## Prior art
+
+- [Minimum-rate predictors](https://www.rs.tus.ac.jp/matsuda-lab/matsuda/mrp/index.html)
+- [PixelCNN++ discretized logistic mixtures](https://arxiv.org/abs/1701.05517)
+
+These references motivate the experiment; this directory does not vendor their
+implementations or claim their results.

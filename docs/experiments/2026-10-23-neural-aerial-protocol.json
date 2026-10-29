@@ -1,0 +1,33 @@
+{
+  "scope": "Frozen before measuring any aerial image. This file records a protocol, not results.",
+  "corpus": "USC SIPI aerials, all twelve native 512x512 color images 2.1.01 through 2.1.12",
+  "selection": "Publisher-listed native dimensions and color type only; no crops, resizing, previews, or result-based exclusions. The 1024x1024 and 2250x2250 images are outside this validation's compute budget.",
+  "prior_known_inputs": "Kodak 01-03 development; all 14 SIPI miscellaneous color images now regressions",
+  "encoder": "scripts/research/local_probability/compress.py",
+  "floor": {
+    "format": "complete wrapped SCDX",
+    "profile": "balanced",
+    "hybrid": true,
+    "partition_depth": 0
+  },
+  "learned": {
+    "hidden_widths": [16, 32],
+    "hidden_layers": 2,
+    "mixtures": 3,
+    "causal_context": true,
+    "epochs": 200,
+    "batch": 8192,
+    "learning_rate": 0.001,
+    "seed": 20261023,
+    "cpu_threads": 4,
+    "device": "auto (MPS on this machine)",
+    "weight_precision_candidates": [16, 12, 10, 8],
+    "precision_scope": "Power-of-two-grid rounding of hidden/head weight matrices only, unchanged guide, affine, and biases. Binary16 model tensors remain in-band.",
+    "format": "self-contained integer NNEX v2 with SHA-256 raw RGB checksum",
+    "train_pixel_limit": 1048576
+  },
+  "selection_rule": "Encode all eight learned candidates, verify each independently, choose the smallest complete file against the actual wrapped SCDX. Keep floor on ties.",
+  "baselines": "Exact RGB PNG (Pillow optimize), WebP lossless cwebp -z 9 -exact, native JPEG XL lossless effort 9, numthreads 1; verify every round-trip",
+  "reporting": "All twelve images, complete files including transmitted model and headers, per-image and aggregate bytes, exact RGBA verification, hashes. No adaptive tuning during this cohort. Runtime under concurrent workers is not isolated latency.",
+  "limitations": "One small aerial corpus, not broad proof or maximum-strength coverage of all existing codecs. Production defaults remain unchanged."
+}

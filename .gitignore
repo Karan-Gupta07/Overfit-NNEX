@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Data: corpora, libraries, checkpoints. Content-addressed, never in git.
+data/
+!data/.gitkeep
+src/semanticcodec/ml/checkpoints/
+
+# Generated results. Summaries are committed by hand into docs/results/.
+docs/results/raw/
+*.sqlite
+*.parquet
+
+# Scratch
+.DS_Store
+notebooks/.ipynb_checkpoints/
+/tmp/
+
+# Local agent config / third-party steering rulesets
+.kiro/
+
+# Agent scratch context, not a deliverable
+AGENTS.md
