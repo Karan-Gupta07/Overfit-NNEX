@@ -10,6 +10,9 @@
 #include <optional>
 #include <mutex>
 #include <thread>
+#if defined(__ARM_NEON)
+#include <arm_neon.h>
+#endif
 #if defined(__APPLE__)
 #include <sys/sysctl.h>
 #endif
@@ -73,9 +76,54 @@ static int window_count(const FitWindows& w){return int(w[0]!=nullptr)+int(w[1]!
 const std::array<std::array<int,2>,4> fit_errors={{{0,-1},{-1,0},{-1,-1},{-1,1}}};
 // Fit, spread, own fit errors, then each decoded plane's fit error at the sample.
 static int fit_features(int ch){return 2+int(fit_errors.size())+(ch==1?0:ch==0?1:2);}
+// Most first-layer inputs are u * 256 with small |u|. When every first-layer
+// weight is a multiple of 2^shift (quantized training makes them so), inputs with
+// |u| <= unit_limit take an exact int16 x int16 -> int32 path (narrow,
+// transposed): unit_limit keeps each output's sum of |w >> shift| * |u| within
+// int32. The rest use the int64 path on wide, the transposed weights. Rows are
+// padded to a multiple of 8 outputs.
 struct Plane{
     int d,base;std::vector<int64_t> guide,affine;
     std::vector<int32_t> w0,b0,w1,b1,wh,bh;
+    bool narrow_ok=false,affine_ok=false;int shift=0,padded=0,head_padded=0,unit_limit=0;
+    std::vector<int16_t> narrow;
+    std::vector<int32_t> wide,w1t,wht;std::vector<int64_t> bias0,bias1,biash,affine_padded;
+    // b * Q + Q / 2 per output, padded outputs Q / 2 (see wide_block).
+    static std::vector<int64_t> biases(const std::vector<int32_t>& b,int padded){
+        std::vector<int64_t> v(size_t(padded),Q/2);
+        for(size_t i=0;i<b.size();i++)v[i]=int64_t(b[i])*Q+Q/2;
+        return v;
+    }
+    static std::vector<int32_t> transpose(const std::vector<int32_t>& w,int ni,int no,int padded){
+        std::vector<int32_t> t(size_t(ni)*padded,0);
+        for(int i=0;i<no;i++)for(int j=0;j<ni;j++)t[size_t(j)*padded+i]=w[size_t(i)*ni+j];
+        return t;
+    }
+    void prepare(int hidden,int heads){
+        padded=(hidden+7)/8*8;head_padded=(heads+7)/8*8;shift=31;
+        w1t=transpose(w1,hidden,hidden,padded);wht=transpose(wh,hidden,heads,head_padded);
+        for(int32_t v:w0)if(v)shift=std::min(shift,__builtin_ctz(uint32_t(v)));
+        if(shift==31)shift=0;
+        narrow.assign(size_t((d+7)/8*8)*padded,0);wide.assign(size_t(d)*padded,0);narrow_ok=true;
+        int64_t most=1;
+        for(int i=0;i<hidden;i++){
+            int64_t total=0;
+            for(int j=0;j<d;j++){
+                const int32_t v=w0[size_t(i)*d+j];const int32_t q=v/(int32_t(1)<<shift);
+                if(q<-32767||q>32767)narrow_ok=false;
+                total+=std::abs(int64_t(q));
+                narrow[size_t(j)*padded+i]=int16_t(std::clamp(q,-32767,32767));wide[size_t(j)*padded+i]=v;
+            }
+            most=std::max(most,total);
+        }
+        // shift <= 23 keeps the narrow sum times 2^(8 + shift) within int64.
+        unit_limit=narrow_ok&&shift<=23?int(std::min<int64_t>(32767,INT32_MAX/most)):0;
+        narrow_ok=unit_limit>0;
+        bias0=biases(b0,padded);bias1=biases(b1,padded);biash=biases(bh,head_padded);
+        affine_padded=affine;affine_padded.resize(size_t((d+7)/8*8),0);
+        affine_ok=true;
+        for(int64_t a:affine)if(a<-INT64_MAX/(32767*128)||a>INT64_MAX/(32767*128))affine_ok=false;
+    }
 };
 struct Model{
     int w,h,hidden,k,fits=0;bool context,far=false,level=false;FitWindows windows{};
@@ -103,7 +151,7 @@ struct Model{
             p.guide=r.i64(p.base);p.affine=r.i64(p.d);
             p.w0=r.i32(hidden*p.d);p.b0=r.i32(hidden);
             p.w1=r.i32(hidden*hidden);p.b1=r.i32(hidden);
-            p.wh=r.i32(3*k*hidden);p.bh=r.i32(3*k);
+            p.wh=r.i32(3*k*hidden);p.bh=r.i32(3*k);p.prepare(hidden,3*k);
         }
         require(r.pos==bytes.size(),"trailing configuration bytes");
     }
@@ -169,7 +217,8 @@ static_assert(FLT_EVAL_METHOD==0,"double expressions must round to double");
 #define UNROLLED
 #endif
 // Own causal samples (zero outside) and decoded planes' taps (edge clamped).
-static int fit_inputs(const Canvas& c,const FitWindow& win,int ch,int x,int y,int32_t* f){
+template<class T>
+static int fit_inputs(const Canvas& c,const FitWindow& win,int ch,int x,int y,T* f){
     int n=0;const std::array<int,2>* taps=win.prior==9?guides.data():cross.data();
     if(x>=2&&x+2<c.w&&y>=2&&y+1<c.h){
         const size_t i=size_t(y)*c.w+x;const long w=c.w;
@@ -190,19 +239,62 @@ static int fit_inputs(const Canvas& c,const FitWindow& win,int ch,int x,int y,in
 static int fit_count(const FitWindow& win,int ch){
     return 12+(ch!=1?win.prior:0)+(ch==2?win.prior:0);
 }
-static int fit_size(const FitWindow& win,int ch){int n=fit_count(win,ch);return n*(n+1)/2+n+1;}
-// acc += outer(p) - outer(q): the packed lower Gram triangle, then input times
-// target, then target squared. Integer sums are exact in any order.
-template<int N>
-static void outer_update(int32_t* acc,const int32_t* p,int32_t tp,const int32_t* q,int32_t tq){
-    int i=0;
-    for(int a=0;a<N;a++){
-        const int32_t pa=p[a],qa=q[a];
-        for(int k=0;k<=a;k++)acc[i+k]+=pa*p[k]-qa*q[k];
-        i+=a+1;
+// Window sums are the lower triangle of the sum of outer products of (inputs,
+// target): the Gram rows, then input times target, then target squared. Row a
+// starts at row_offset(a) and is padded to a multiple of 4 entries so rows update
+// in whole vectors; padding holds products above the diagonal and is never read.
+static constexpr int row_offset(int a){int o=0;for(int r=0;r<a;r++)o+=(r+4)/4*4;return o;}
+static int fit_size(const FitWindow& win,int ch){return row_offset(fit_count(win,ch)+1);}
+constexpr int FIT_VECTOR=(FIT_INPUTS+1+3)/4*4;
+// acc += outer(p) - outer(q) for M-entry vectors zero padded to FIT_VECTOR.
+// Samples are at most 255, so int16 x int16 -> int32 products are exact, and
+// integer sums are exact in any order.
+template<int M>
+static void outer_update(int32_t* acc,const int16_t* p,const int16_t* q){
+    UNROLLED
+    for(int a=0;a<M;a++){
+        int32_t* row=acc+row_offset(a);const int16_t pa=p[a],qa=q[a];
+        UNROLLED
+        for(int k=0;k<=a;k+=4){
+#if defined(__ARM_NEON)
+            int32x4_t v=vld1q_s32(row+k);
+            v=vmlal_n_s16(v,vld1_s16(p+k),pa);v=vmlsl_n_s16(v,vld1_s16(q+k),qa);
+            vst1q_s32(row+k,v);
+#else
+            for(int l=k;l<k+4;l++)row[l]+=int32_t(pa)*p[l]-int32_t(qa)*q[l];
+#endif
+        }
     }
-    for(int a=0;a<N;a++)acc[i+a]+=p[a]*tp-q[a]*tq;
-    acc[i+N]+=tp*tp-tq*tq;
+}
+// One window step: dst = src + outer(cp) - outer(cq), then
+// total += dst - old + outer(lp) - outer(lq). dst may be src.
+template<int M>
+static void window_step(int32_t* total,int32_t* dst,const int32_t* src,const int16_t* cp,
+                        const int16_t* cq,const int32_t* old,const int16_t* lp,const int16_t* lq){
+    UNROLLED
+    for(int a=0;a<M;a++){
+        const int o=row_offset(a);
+        UNROLLED
+        for(int k=0;k<=a;k+=4){
+#if defined(__ARM_NEON)
+            int32x4_t v=vld1q_s32(src+o+k);
+            v=vmlal_n_s16(v,vld1_s16(cp+k),cp[a]);v=vmlsl_n_s16(v,vld1_s16(cq+k),cq[a]);
+            vst1q_s32(dst+o+k,v);
+            int32x4_t t=vaddq_s32(vld1q_s32(total+o+k),vsubq_s32(v,vld1q_s32(old+o+k)));
+            t=vmlal_n_s16(t,vld1_s16(lp+k),lp[a]);t=vmlsl_n_s16(t,vld1_s16(lq+k),lq[a]);
+            vst1q_s32(total+o+k,t);
+#else
+            for(int l=k;l<k+4;l++){
+                const int32_t v=src[o+l]+int32_t(cp[a])*cp[l]-int32_t(cq[a])*cq[l];dst[o+l]=v;
+                total[o+l]+=v-old[o+l]+int32_t(lp[a])*lp[l]-int32_t(lq[a])*lq[l];
+            }
+#endif
+        }
+    }
+}
+// The packed lower triangle of the first rows rows of window sums.
+static void unpack(const int32_t* sums,int rows,double* work){
+    for(int a=0,k=0,o=0;a<rows;o+=(a+4)/4*4,a++)for(int b=0;b<=a;b++)work[k++]=double(sums[o+b]);
 }
 // Ridge solve of the window sums and the fit at inputs f. The operation order
 // is normative (see above); N only fixes loop bounds at compile time.
@@ -211,9 +303,9 @@ static void solve(const int32_t* sums,const int32_t* f,int64_t count,double ridg
                   double& residual){
     constexpr int tri=N*(N+1)/2;
     double work[tri],lower[N*N],upper[N*N],D[N],col[N],b[N],z[N],beta[N];
-    for(int k=0;k<tri;k++)work[k]=double(sums[k]);
-    for(int k=0;k<N;k++)b[k]=double(sums[tri+k]);
-    const double tt=double(sums[tri+N]);
+    unpack(sums,N,work);
+    for(int k=0;k<N;k++)b[k]=double(sums[row_offset(N)+k]);
+    const double tt=double(sums[row_offset(N)+N]);
     double trace=0;for(int a=0;a<N;a++)trace+=work[a*(a+1)/2+a];
     const double ridge=std::max(1.0,trace/N)*ridge_scale;
     for(int a=0;a<N;a++)work[a*(a+1)/2+a]+=ridge;
@@ -255,7 +347,7 @@ static void solve_bordered(const int32_t* sums,const int32_t* f,int64_t count,do
                            double& p,double& residual){
     constexpr int M=N+1,tri=M*(M+1)/2;
     double work[tri],col[M],g[M];
-    for(int k=0;k<tri;k++)work[k]=double(sums[k]);
+    unpack(sums,M,work);
     double trace=0;for(int a=0;a<N;a++)trace+=work[a*(a+1)/2+a];
     const double ridge=std::max(1.0,trace/N)*ridge_scale;
     for(int a=0;a<N;a++)work[a*(a+1)/2+a]+=ridge;
@@ -282,84 +374,117 @@ static void solve_bordered(const int32_t* sums,const int32_t* f,int64_t count,do
 }
 // solve_bordered for two windows at once, lane l from sums[l], f[l], count[l] and
 // ridge[l]. Each entry gets the same updates in the same j order as above, so the
-// bits match; only the schedule differs (left-looking, two lanes per operation).
+// bits match; only the schedule differs: left-looking, two lanes per operation,
+// and columns two at a time, column k+1 taking its updates j < k alongside
+// column k's.
 typedef double Lanes __attribute__((vector_size(16)));
 template<int N>
 static void solve_bordered2(const int32_t* const* sums,const int32_t* const* f,const int64_t* count,
                             const double* ridge_scale,double* p,double* residual){
     constexpr int M=N+1;
-    Lanes A[M][M],L[N][M],C[M][N],G[N];
+    // A[a][a+1] takes padding when rows convert in pairs.
+    Lanes A[M][M+1],L[N][M],C[M][N],G[N];
+    // Whole-vector stores: lane-by-lane stores stall the matrix loads that follow.
+    UNROLLED
+    for(int a=0;a<M;a++){
+        const int32_t *s0=sums[0]+row_offset(a),*s1=sums[1]+row_offset(a);
+#if defined(__ARM_NEON)
+        UNROLLED
+        for(int b=0;b<=a;b+=2){
+            const float64x2_t x=vcvtq_f64_s64(vmovl_s32(vld1_s32(s0+b)));
+            const float64x2_t y=vcvtq_f64_s64(vmovl_s32(vld1_s32(s1+b)));
+            A[a][b]=Lanes(vzip1q_f64(x,y));A[a][b+1]=Lanes(vzip2q_f64(x,y));
+        }
+#else
+        for(int b=0;b<=a;b++)A[a][b]=Lanes{double(s0[b]),double(s1[b])};
+#endif
+    }
     for(int l=0;l<2;l++){
-        int k=0;
-        for(int a=0;a<M;a++)for(int b=0;b<=a;b++)A[a][b][l]=double(sums[l][k++]);
         double trace=0;for(int a=0;a<N;a++)trace+=A[a][a][l];
         const double ridge=std::max(1.0,trace/N)*ridge_scale[l];
         for(int a=0;a<N;a++)A[a][a][l]+=ridge;
     }
     bool live[2]={true,true};
-    UNROLLED
-    for(int k=0;k<M;k++){
-        Lanes acc[M],g={0.0,0.0};
-        for(int i=k;i<M;i++)acc[i]=A[i][k];
-        if(k<N)g=Lanes{double(f[0][k]),double(f[1][k])};
-        UNROLLED
-        for(int j=0;j<k;j++){
-            const Lanes c=C[k][j];
-            UNROLLED
-            for(int i=k;i<M;i++)acc[i]-=L[j][i]*c;
-            g-=G[j]*c;
-        }
+    // Pivots column k from acc (rows k..M-1) and g; false once both lanes are done.
+    auto finish=[&](int k,const Lanes* acc,Lanes g)->bool{
         if(k==N){
             for(int l=0;l<2;l++)if(live[l]){
                 p[l]=-g[l];residual[l]=acc[N][l]/double(std::max<int64_t>(1,count[l]));
             }
-            return;
+            return false;
         }
         const Lanes d=acc[k];
         for(int l=0;l<2;l++)live[l]=live[l]&&d[l]>0;
-        if(!live[0]&&!live[1])return;
+        if(!live[0]&&!live[1])return false;
         const Lanes inverse=1/d;
         for(int i=k+1;i<M;i++){C[i][k]=acc[i];L[k][i]=acc[i]*inverse;}
         G[k]=g*inverse;
+        return true;
+    };
+    UNROLLED
+    for(int k=0;k<M;k+=2){
+        const bool two=k+1<M;
+        Lanes acc0[M],acc1[M],g0={0.0,0.0},g1={0.0,0.0};
+        for(int i=k;i<M;i++)acc0[i]=A[i][k];
+        if(two)for(int i=k+1;i<M;i++)acc1[i]=A[i][k+1];
+        if(k<N)g0=Lanes{double(f[0][k]),double(f[1][k])};
+        if(k+1<N)g1=Lanes{double(f[0][k+1]),double(f[1][k+1])};
+        UNROLLED
+        for(int j=0;j<k;j++){
+            const Lanes c0=C[k][j];
+            acc0[k]-=L[j][k]*c0;g0-=G[j]*c0;
+            if(two){
+                const Lanes c1=C[k+1][j];g1-=G[j]*c1;
+                UNROLLED
+                for(int i=k+1;i<M;i++){const Lanes l=L[j][i];acc0[i]-=l*c0;acc1[i]-=l*c1;}
+            }
+        }
+        if(!finish(k,acc0,g0))return;
+        if(two){
+            const Lanes c1=C[k+1][k];
+            UNROLLED
+            for(int i=k+1;i<M;i++)acc1[i]-=L[k][i]*c1;
+            g1-=G[k]*c1;
+            if(!finish(k+1,acc1,g1))return;
+        }
     }
 }
 // One row of fits in column order. predict(x) reads row y only left of x and
 // rows above only through column x+cols. Column sums over the window rows go
 // to sums (width x fit_size); given the row above's sums they update exactly.
+// total holds the window's sums: whole columns x-cols..x+cols over the rows
+// above plus row y's samples x-cols..x-1.
 struct LocalFit{
+    using Sample=std::array<int16_t,FIT_VECTOR>;
     const Canvas& c;const FitWindow& win;int ch,y,n,m,rows;int32_t* sums;const int32_t* above;
-    std::vector<int32_t> window,left,total;
-    std::array<int32_t,FIT_INPUTS> f{},g{},h{};
+    std::vector<int32_t> total,zero,scratch;
+    std::array<int32_t,FIT_INPUTS> f{};Sample g{},h{},cp{},cq{},lp{},lq{};const Sample none{};
     LocalFit(const Canvas& canvas,const FitWindow& fit_window,int channel,int row,int32_t* row_sums,
              const int32_t* above_sums)
         :c(canvas),win(fit_window),ch(channel),y(row),sums(row_sums),
          above(row>0?above_sums:nullptr){
-        n=fit_count(win,ch);m=n*(n+1)/2+n+1;
+        n=fit_count(win,ch);m=fit_size(win,ch);
         rows=y-std::max(0,y-win.rows);
-        window.assign(m,0);left.assign(m,0);total.assign(m,0);
-        for(int x=0;x<=std::min(c.w-1,win.cols);x++)accumulate(window.data(),column(x),nullptr);
+        total.assign(m,0);zero.assign(m,0);scratch.assign(m,0);
+        for(int x=0;x<=std::min(c.w-1,win.cols);x++){
+            const int32_t* s=column(x);for(int k=0;k<m;k++)total[k]+=s[k];
+        }
     }
     // acc += outer(sample (px,py)) - outer(sample (qx,qy)); qy<0 means none.
     void update(int32_t* acc,int px,int py,int qx,int qy){
-        fit_inputs(c,win,ch,px,py,g.data());const int32_t tp=c.pixels[ch][size_t(py)*c.w+px];
-        int32_t tq=0;
-        if(qy>=0){fit_inputs(c,win,ch,qx,qy,h.data());tq=c.pixels[ch][size_t(qy)*c.w+qx];}
-        else h.fill(0);
+        sample(g,px,py);
+        if(qy>=0)sample(h,qx,qy);else h.fill(0);
         switch(n){
-            case 12:outer_update<12>(acc,g.data(),tp,h.data(),tq);break;
-            case 17:outer_update<17>(acc,g.data(),tp,h.data(),tq);break;
-            case 21:outer_update<21>(acc,g.data(),tp,h.data(),tq);break;
-            case 22:outer_update<22>(acc,g.data(),tp,h.data(),tq);break;
-            default:outer_update<30>(acc,g.data(),tp,h.data(),tq);break;
+            case 12:outer_update<13>(acc,g.data(),h.data());break;
+            case 17:outer_update<18>(acc,g.data(),h.data());break;
+            case 21:outer_update<22>(acc,g.data(),h.data());break;
+            case 22:outer_update<23>(acc,g.data(),h.data());break;
+            default:outer_update<31>(acc,g.data(),h.data());break;
         }
     }
-    // acc += now - old, either of which may be absent. Locals keep the bound
-    // loop-invariant so the loops vectorize.
-    void accumulate(int32_t* acc,const int32_t* now,const int32_t* old)const{
-        const int size=m;
-        if(now&&old)for(int k=0;k<size;k++)acc[k]+=now[k]-old[k];
-        else if(old)for(int k=0;k<size;k++)acc[k]-=old[k];
-        else if(now)for(int k=0;k<size;k++)acc[k]+=now[k];
+    // Inputs then target at (x, y); entries past them stay zero.
+    void sample(Sample& v,int x,int y)const{
+        fit_inputs(c,win,ch,x,y,v.data());v[n]=c.pixels[ch][size_t(y)*c.w+x];
     }
     const int32_t* column(int x){
         int32_t* s=&sums[size_t(x)*m];
@@ -372,18 +497,34 @@ struct LocalFit{
         return s;
     }
     // Moves the window to column x: total holds its sums and f the inputs at x.
-    // Returns the window's sample count.
+    // Returns the window's sample count. One pass adds column x+cols (built from
+    // the row above's), drops column x-1-cols and moves row y's sample x-1 in and
+    // x-1-cols out; absent terms read zeros.
     int64_t prepare(int x){
         if(x>0){
-            const bool drop=x-1-win.cols>=0,add=x+win.cols<c.w;
-            const int32_t* old=drop?&sums[size_t(x-1-win.cols)*m]:nullptr;
-            const int32_t* now=add?column(x+win.cols):nullptr;
-            accumulate(window.data(),now,old);
-            update(left.data(),x-1,y,x-1-win.cols,drop?y:-1);
+            const int cx=x+win.cols,dx=x-1-win.cols;
+            const int32_t* old=dx>=0?&sums[size_t(dx)*m]:zero.data();
+            const Sample *p=&none,*q=&none;
+            int32_t* dst=scratch.data();const int32_t* src=zero.data();
+            if(cx<c.w){
+                dst=&sums[size_t(cx)*m];
+                if(above){
+                    src=&above[size_t(cx)*m];sample(cp,cx,y-1);p=&cp;
+                    if(y-1-win.rows>=0){sample(cq,cx,y-1-win.rows);q=&cq;}
+                }else src=column(cx);
+            }
+            sample(lp,x-1,y);const Sample* l=&none;
+            if(dx>=0){sample(lq,dx,y);l=&lq;}
+            const int16_t *a=p->data(),*b=q->data(),*e=lp.data(),*z=l->data();int32_t* t=total.data();
+            switch(n){
+                case 12:window_step<13>(t,dst,src,a,b,old,e,z);break;
+                case 17:window_step<18>(t,dst,src,a,b,old,e,z);break;
+                case 21:window_step<22>(t,dst,src,a,b,old,e,z);break;
+                case 22:window_step<23>(t,dst,src,a,b,old,e,z);break;
+                default:window_step<31>(t,dst,src,a,b,old,e,z);break;
+            }
         }
         fit_inputs(c,win,ch,x,y,f.data());
-        const int32_t *a=window.data(),*b=left.data();int32_t* t=total.data();
-        for(int k=0,size=m;k<size;k++)t[k]=a[k]+b[k];
         return int64_t(rows)*(std::min(c.w-1,x+win.cols)-std::max(0,x-win.cols)+1)+
                (x-std::max(0,x-win.cols));
     }
@@ -427,7 +568,8 @@ static void predict_pair(LocalFit& a,LocalFit& b,int x,int16_t& fit0,int16_t& sp
         default:solve_bordered2<22>(sums,f,count,ridge,p,residual);break;
     }
     a.store(p[0],residual[0],fit0,spread0);b.store(p[1],residual[1],fit1,spread1);
-}// 8 log2(1 + spread/16), linear between powers of two.
+}
+// 8 log2(1 + spread/16), linear between powers of two.
 static int spread_feature(int spread){
     uint32_t v=uint32_t(spread)+16;int e=31-__builtin_clz(v);
     return 8*(e-4)+int(((v-(uint32_t(1)<<e))*8)>>e);
@@ -438,62 +580,93 @@ struct Features{
     void add(int v){add_q(v*(Q/32));}
 };
 static bool past(int dy,int dx){return dy<0||(dy==0&&dx<0);}
+// Every tap the features read, (dx, dy) in [-3, 3] x [-3, 1], lies inside the
+// canvas, so taps index directly; elsewhere they go through Canvas's edge rules.
+static bool inside(const Canvas& c,int x,int y){return x>=3&&x+3<c.w&&y>=3&&y+1<c.h;}
+template<bool INSIDE>
+struct Taps{
+    const Canvas& c;int x,y;size_t i;
+    Taps(const Canvas& canvas,int px,int py):c(canvas),x(px),y(py),i(size_t(py)*canvas.w+px){}
+    long at(int dx,int dy)const{return long(i)+long(dy)*c.w+dx;}
+    int sample(int ch,int dx,int dy,bool zero=true)const{
+        if constexpr(INSIDE)return c.pixels[ch][at(dx,dy)];else return c.sample(ch,x,y,dx,dy,zero);
+    }
+    int error(int ch,int dx,int dy,bool zero=true)const{
+        if constexpr(INSIDE)return c.errors[ch][at(dx,dy)];else return c.error(ch,x,y,dx,dy,zero);
+    }
+    int difference(int a,int b,int dx,int dy,bool zero)const{
+        if constexpr(INSIDE)return int(c.pixels[a][at(dx,dy)])-int(c.pixels[b][at(dx,dy)]);
+        else return c.difference(a,b,x,y,dx,dy,zero);
+    }
+    int location(int dx,int dy)const{
+        if constexpr(INSIDE)return int(at(dx,dy));else return c.location(x,y,dx,dy,true);
+    }
+};
 // Reads pixels only, never errors, so every prediction (and error) of a known
 // image can be computed before any context feature.
-static void base_features(const Model& m,const Canvas& c,int ch,int x,int y,Features& f){
+template<bool INSIDE>
+static void base_features(const Model& m,const Taps<INSIDE>& t,int ch,Features& f){
     const Plane& p=m.plane[ch];
-    int west=c.sample(ch,x,y,-1,0),north=c.sample(ch,x,y,0,-1),nw=c.sample(ch,x,y,-1,-1);
-    int green=c.sample(1,x,y,0,0);
+    int west=t.sample(ch,-1,0),north=t.sample(ch,0,-1),nw=t.sample(ch,-1,-1);
+    int green=t.sample(1,0,0);
     f.anchor=ch==1?std::clamp(west+north-nw,std::min(west,north),std::max(west,north)):green;
     f.add(1);
     if(ch==1){
-        for(auto d:causal)f.add(c.sample(ch,x,y,d[1],d[0])-f.anchor);
+        for(auto d:causal)f.add(t.sample(ch,d[1],d[0])-f.anchor);
         f.add(std::clamp(west+north-nw,0,255)-f.anchor);
     }else{
-        for(auto d:causal)f.add(c.difference(ch,1,x,y,d[1],d[0],true));
+        for(auto d:causal)f.add(t.difference(ch,1,d[1],d[0],true));
         for(size_t i=1;i<guides.size();i++){
-            auto d=guides[i];f.add(c.sample(1,x,y,d[1],d[0],past(d[0],d[1]))-green);
+            auto d=guides[i];f.add(t.sample(1,d[1],d[0],past(d[0],d[1]))-green);
         }
         if(ch==2)for(auto d:guides)
-            f.add(c.difference(0,1,x,y,d[1],d[0],past(d[0],d[1])));
+            f.add(t.difference(0,1,d[1],d[0],past(d[0],d[1])));
     }
     require(f.n==p.base,"base feature mismatch");
     // Base features are integer samples divided by 32; this division is exact.
-    int64_t raw=0;for(int i=0;i<f.n;i++)raw+=int64_t(f.x[i])*p.guide[i];raw/=Q/32;
+    int64_t part[4]={0,0,0,0};int i=0;
+    for(;i+4<=f.n;i+=4)for(int t=0;t<4;t++)part[t]+=int64_t(f.x[i+t])*p.guide[i+t];
+    for(;i<f.n;i++)part[0]+=int64_t(f.x[i])*p.guide[i];
+    int64_t raw=(part[0]+part[1])+(part[2]+part[3]);raw/=Q/32;
     f.raw=raw;
     f.prediction=int(std::clamp(floor_div(raw+f.anchor*GUIDE_Q+GUIDE_Q/2,GUIDE_Q),
                               int64_t(0),int64_t(255)));
 }
-static Features features(const Model& m,const Canvas& c,int ch,int x,int y){
-    Features f;base_features(m,c,ch,x,y,f);const Plane& p=m.plane[ch];
+static void base_features(const Model& m,const Canvas& c,int ch,int x,int y,Features& f){
+    if(inside(c,x,y))base_features(m,Taps<true>(c,x,y),ch,f);
+    else base_features(m,Taps<false>(c,x,y),ch,f);
+}
+template<bool INSIDE>
+static Features features(const Model& m,const Taps<INSIDE>& t,int ch){
+    Features f;base_features(m,t,ch,f);const Plane& p=m.plane[ch];const Canvas& c=t.c;
     if(m.context){
-        int green=c.sample(1,x,y,0,0);
+        int green=t.sample(1,0,0);
         for(int i=0;i<6;i++){
-            auto d=causal[i];int e=c.error(ch,x,y,d[1],d[0]);f.add(e);f.add(std::abs(e));
+            auto d=causal[i];int e=t.error(ch,d[1],d[0]);f.add(e);f.add(std::abs(e));
         }
         if(ch!=1){
-            for(auto d:guides)f.add(c.error(1,x,y,d[1],d[0],past(d[0],d[1])));
-            if(ch==2)for(auto d:guides)f.add(c.error(0,x,y,d[1],d[0],past(d[0],d[1])));
+            for(auto d:guides)f.add(t.error(1,d[1],d[0],past(d[0],d[1])));
+            if(ch==2)for(auto d:guides)f.add(t.error(0,d[1],d[0],past(d[0],d[1])));
             f.add((green%4)*8);f.add_q(green*(Q/256));
-            if(ch==2)f.add((c.sample(0,x,y,0,0)%4)*8);
+            if(ch==2)f.add((t.sample(0,0,0)%4)*8);
         }
         int64_t phase=f.raw%GUIDE_Q;if(phase<0)phase+=GUIDE_Q;
         f.add_q(rounded(phase,GUIDE_Q/Q));
     }
     if(m.far)for(auto d:far_taps){
-        if(ch==1)f.add(c.sample(ch,x,y,d[1],d[0])-f.anchor);
-        else f.add(c.difference(ch,1,x,y,d[1],d[0],true));
+        if(ch==1)f.add(t.sample(ch,d[1],d[0])-f.anchor);
+        else f.add(t.difference(ch,1,d[1],d[0],true));
     }
     if(m.level){
-        f.add(ch==1?f.anchor:c.sample(ch,x,y,-1,0));
-        f.add((y%2)*32);f.add((x%2)*32);f.add(((x+y)%2)*32);
+        f.add(ch==1?f.anchor:t.sample(ch,-1,0));
+        f.add((t.y%2)*32);f.add((t.x%2)*32);f.add(((t.x+t.y)%2)*32);
     }
     for(int s=0;s<m.fits;s++){
-        const size_t i=size_t(y)*m.w+x;const auto& fits=c.fits[s];
+        const size_t i=t.i;const auto& fits=c.fits[s];
         f.add_q(int64_t(fits[ch][i]-8*f.anchor)*(Q/256));
         f.add(spread_feature(c.spreads[s][ch][i]));
         for(auto d:fit_errors){
-            int j=c.location(x,y,d[1],d[0],true);
+            int j=t.location(d[1],d[0]);
             f.add_q(j<0?0:int64_t(8*c.pixels[ch][j]-fits[ch][j])*(Q/256));
         }
         for(int prior:{1,0}){
@@ -502,6 +675,10 @@ static Features features(const Model& m,const Canvas& c,int ch,int x,int y){
         }
     }
     require(f.n==p.d,"full feature mismatch");return f;
+}
+static Features features(const Model& m,const Canvas& c,int ch,int x,int y){
+    if(inside(c,x,y))return features(m,Taps<true>(c,x,y),ch);
+    return features(m,Taps<false>(c,x,y),ch);
 }
 static void dense(const int32_t* in,int ni,const std::vector<int32_t>& w,
                   const std::vector<int32_t>& b,int32_t* out,int no,bool relu){
@@ -512,9 +689,169 @@ static void dense(const int32_t* in,int ni,const std::vector<int32_t>& w,
         out[i]=int32_t(relu?std::max(int64_t(0),value):value);
     }
 }
+// The layers of dense(), bit for bit: integer sums are exact in any order and
+// zero inputs add nothing, so these skip zeros and take first-layer inputs
+// u * 256 with |u| <= limit through int16 products (Plane::prepare): value[j]
+// is u for those inputs and zero for the others, which large lists. value is
+// zero from n to the next multiple of 8; x must be readable that far.
+struct Split{alignas(16) int16_t value[128];int large[128];int nl=0;};
+static bool narrow_input(int32_t v,int limit){return (v&255)==0&&v/256>=-limit&&v/256<=limit;}
+static void split_inputs(const int32_t* x,int n,int limit,Split& s){
+    int nl=0;
+#if defined(__ARM_NEON)
+    const int32x4_t lim=vdupq_n_s32(limit),low=vdupq_n_s32(255),count=vdupq_n_s32(n),step=vdupq_n_s32(4);
+    const int32_t first[4]={0,1,2,3};int32x4_t index=vld1q_s32(first);
+    for(int j=0;j<n;j+=8){
+        int16x4_t half[2];
+        UNROLLED for(int h=0;h<2;h++){
+            const int32x4_t v=vld1q_s32(x+j+4*h),u=vshrq_n_s32(v,8);
+            const uint32x4_t inside=vcltq_s32(index,count);
+            const uint32x4_t ok=vandq_u32(vceqzq_s32(vandq_s32(v,low)),vcleq_s32(vabsq_s32(u),lim));
+            half[h]=vmovn_s32(vandq_s32(u,vreinterpretq_s32_u32(vandq_u32(ok,inside))));
+            if(vmaxvq_u32(vbicq_u32(inside,ok)))
+                for(int l=j+4*h;l<std::min(n,j+4*h+4);l++)if(!narrow_input(x[l],limit))s.large[nl++]=l;
+            index=vaddq_s32(index,step);
+        }
+        vst1q_s16(s.value+j,vcombine_s16(half[0],half[1]));
+    }
+#else
+    for(int j=0;j<n;j++){
+        const bool fits=narrow_input(x[j],limit);
+        s.value[j]=int16_t(fits?x[j]/256:0);
+        if(!fits)s.large[nl++]=j;
+    }
+    for(int j=n;j%8;j++)s.value[j]=0;
+#endif
+    s.nl=nl;
+}
+// Each layer adds bias[i] = b[i] * Q + Q / 2 (Plane::prepare), so its output
+// clamp(rounded(sum, Q), -LIMIT, LIMIT) is clamp(floor(sum' / Q), ...).
+#if defined(__ARM_NEON)
+// acc holds outputs o..o+H-1 in pairs. Adds the listed inputs to all of them at
+// once, so the sums' dependency chains overlap, then stores them clamped.
+template<int P,int H>
+static inline void wide_block(int64x2_t* acc,const int32_t* wt,int o,const int* idx,int n,
+                              const int32_t* x,int32_t* out,bool relu){
+    for(int l=0;l<n;l++){
+        const int32_t* row=wt+size_t(idx[l])*P+o;const int32_t v=x[idx[l]];
+        UNROLLED for(int c=0;c<H/4;c++){
+            const int32x4_t w=vld1q_s32(row+4*c);
+            acc[2*c]=vmlal_n_s32(acc[2*c],vget_low_s32(w),v);
+            acc[2*c+1]=vmlal_high_n_s32(acc[2*c+1],w,v);
+        }
+    }
+    const int32x4_t low=vdupq_n_s32(relu?0:int32_t(-LIMIT)),high=vdupq_n_s32(int32_t(LIMIT));
+    UNROLLED for(int c=0;c<H/4;c++){
+        const int32x4_t v=vcombine_s32(vqmovn_s64(vshrq_n_s64(acc[2*c],16)),
+                                       vqmovn_s64(vshrq_n_s64(acc[2*c+1],16)));
+        vst1q_s32(out+o+4*c,vminq_s32(vmaxq_s32(v,low),high));
+    }
+}
+// Output blocks whose accumulators fit in registers.
+template<int P> constexpr int BLOCK=P<=48?P:P/2;
+#else
+static void finish_scalar(int64_t* sum,const int32_t* wt,int P,const int* idx,int n,const int32_t* x,
+                          int32_t* out,bool relu){
+    for(int l=0;l<n;l++){
+        const int32_t* row=wt+size_t(idx[l])*P;const int64_t v=x[idx[l]];
+        for(int i=0;i<P;i++)sum[i]+=v*row[i];
+    }
+    for(int i=0;i<P;i++){
+        const int64_t value=std::clamp(floor_div(sum[i],Q),-LIMIT,LIMIT);
+        out[i]=int32_t(relu?std::max(int64_t(0),value):value);
+    }
+}
+#endif
+static_assert(Q==65536,"layer shifts");
+template<int P>
+static void first_layer(const Plane& p,const int32_t* x,const Split& s,int32_t* out){
+#if defined(__ARM_NEON)
+    // Two accumulator sets halve the dependency chains while registers allow.
+    constexpr int S=P<=48?2:1;
+    int32x4_t acc[S][P/4];
+    UNROLLED for(int k=0;k<P/4;k++)UNROLLED for(int t=0;t<S;t++)acc[t][k]=vdupq_n_s32(0);
+    const int16_t* row=p.narrow.data();
+    for(int j=0;j<p.d;j+=8,row+=8*P){
+        const int16x8_t v=vld1q_s16(s.value+j);
+#define NARROW_STEP(L) {const int16x8_t w=vld1q_s16(row+(L)*P+8*k);constexpr int t=(L)*S/8; \
+            acc[t][2*k]=vmlal_laneq_s16(acc[t][2*k],vget_low_s16(w),v,L); \
+            acc[t][2*k+1]=vmlal_high_laneq_s16(acc[t][2*k+1],w,v,L);}
+        UNROLLED for(int k=0;k<P/8;k++){
+            NARROW_STEP(0)NARROW_STEP(1)NARROW_STEP(2)NARROW_STEP(3)
+            NARROW_STEP(4)NARROW_STEP(5)NARROW_STEP(6)NARROW_STEP(7)
+        }
+#undef NARROW_STEP
+    }
+    if constexpr(S==2){UNROLLED for(int k=0;k<P/4;k++)acc[0][k]=vaddq_s32(acc[0][k],acc[1][k]);}
+    const int64x2_t shift=vdupq_n_s64(8+p.shift);
+    constexpr int H=BLOCK<P>;
+    UNROLLED for(int o=0;o<P;o+=H){
+        int64x2_t a[H/2];
+        UNROLLED for(int c=0;c<H/4;c++){
+            const int32x4_t v=acc[0][o/4+c];
+            a[2*c]=vaddq_s64(vshlq_s64(vmovl_s32(vget_low_s32(v)),shift),vld1q_s64(&p.bias0[o+4*c]));
+            a[2*c+1]=vaddq_s64(vshlq_s64(vmovl_high_s32(v),shift),vld1q_s64(&p.bias0[o+4*c+2]));
+        }
+        wide_block<P,H>(a,p.wide.data(),o,s.large,s.nl,x,out,true);
+    }
+#else
+    int32_t narrow[P]{};int64_t sum[P];
+    for(int j=0;j<p.d;j++){
+        const int16_t* row=&p.narrow[size_t(j)*P];const int32_t v=s.value[j];
+        for(int i=0;i<P;i++)narrow[i]+=v*row[i];
+    }
+    for(int i=0;i<P;i++)sum[i]=int64_t(narrow[i])*(int64_t(256)<<p.shift)+p.bias0[i];
+    finish_scalar(sum,p.wide.data(),P,s.large,s.nl,x,out,true);
+#endif
+}
+template<int P>
+static void sparse_layer(const int32_t* in,int ni,const std::vector<int32_t>& wt,
+                         const std::vector<int64_t>& bias,int32_t* out,bool relu){
+    int idx[64];int n=0;
+    for(int j=0;j<ni;j++){idx[n]=j;n+=in[j]!=0;}
+#if defined(__ARM_NEON)
+    constexpr int H=BLOCK<P>;
+    UNROLLED for(int o=0;o<P;o+=H){
+        int64x2_t a[H/2];
+        UNROLLED for(int c=0;c<H/2;c++)a[c]=vld1q_s64(&bias[o+2*c]);
+        wide_block<P,H>(a,wt.data(),o,idx,n,in,out,relu);
+    }
+#else
+    int64_t sum[P];for(int i=0;i<P;i++)sum[i]=bias[i];
+    finish_scalar(sum,wt.data(),P,idx,n,in,out,relu);
+#endif
+}
+// Writes padded outputs; padding reads zero weights and yields zero.
+static void sparse_layer(const int32_t* in,int ni,const std::vector<int32_t>& wt,int padded,
+                         const std::vector<int64_t>& bias,int32_t* out,bool relu){
+    switch(padded){
+        case 8:sparse_layer<8>(in,ni,wt,bias,out,relu);break;
+        case 16:sparse_layer<16>(in,ni,wt,bias,out,relu);break;
+        case 24:sparse_layer<24>(in,ni,wt,bias,out,relu);break;
+        case 32:sparse_layer<32>(in,ni,wt,bias,out,relu);break;
+        case 40:sparse_layer<40>(in,ni,wt,bias,out,relu);break;
+        case 48:sparse_layer<48>(in,ni,wt,bias,out,relu);break;
+        case 56:sparse_layer<56>(in,ni,wt,bias,out,relu);break;
+        case 64:sparse_layer<64>(in,ni,wt,bias,out,relu);break;
+        default:throw std::logic_error("layer width");
+    }
+}
+static void first_layer(const Plane& p,const int32_t* x,const Split& s,int32_t* out,int hidden){
+    switch(p.narrow_ok?p.padded:0){
+        case 8:first_layer<8>(p,x,s,out);break;
+        case 16:first_layer<16>(p,x,s,out);break;
+        case 24:first_layer<24>(p,x,s,out);break;
+        case 32:first_layer<32>(p,x,s,out);break;
+        case 40:first_layer<40>(p,x,s,out);break;
+        case 48:first_layer<48>(p,x,s,out);break;
+        case 56:first_layer<56>(p,x,s,out);break;
+        case 64:first_layer<64>(p,x,s,out);break;
+        default:dense(x,p.d,p.w0,p.b0,out,hidden,true);
+    }
+}
 struct Tables{
-    std::vector<uint32_t> negative,scales;
-    Tables():negative(16*Q+1),scales(11*Q+1){
+    std::vector<uint32_t> negative,scales,positive;
+    Tables():negative(16*Q+1),scales(11*Q+1),positive(16*Q+1){
         // Normative integer recurrence, not a platform exponential function.
         // Constants: rounded exp(+/-1/65536)*2^62 and exp(-4)*2^48.
         uint64_t n=uint64_t(1)<<48,p=5155394029647ULL;
@@ -528,6 +865,11 @@ struct Tables{
             p=uint64_t((__uint128_t(p)*4611756387708439211ULL+
                         (__uint128_t(1)<<61))>>62);
         }
+        // Rounded 2^60 / (2^30 + negative), the logistic of z >= 0 (Distribution::sigmoid).
+        for(size_t i=0;i<positive.size();i++){
+            const uint64_t den=(uint64_t(1)<<30)+negative[i];
+            positive[i]=uint32_t(((uint64_t(1)<<60)+den/2)/den);
+        }
     }
 };
 static const Tables& tables(){static const Tables t;return t;}
@@ -537,9 +879,8 @@ struct Distribution{
     std::array<uint32_t,4> weights{},scales{};std::array<int64_t,4> means{};
     static uint32_t sigmoid(int64_t z){
         if(z>=16*Q)return uint32_t(PROB);if(z<=-16*Q)return 0;
-        uint64_t den=PROB+tables().negative[size_t(z<0?-z:z)];
-        uint64_t positive=(PROB*PROB+den/2)/den;
-        return uint32_t(z<0?PROB-positive:positive);
+        const uint32_t positive=tables().positive[size_t(z<0?-z:z)];
+        return z<0?uint32_t(PROB)-positive:positive;
     }
     uint32_t raw(int v)const{
         uint64_t sum=0;
@@ -582,12 +923,22 @@ struct Distribution{
 };
 static Distribution infer(const Model& m,int ch,const Features& f){
     const Plane& p=m.plane[ch];std::array<int32_t,64> h0{},h1{};
-    std::array<int32_t,12> raw{};
-    dense(f.x.data(),p.d,p.w0,p.b0,h0.data(),m.hidden,true);
-    dense(h0.data(),m.hidden,p.w1,p.b1,h1.data(),m.hidden,true);
-    dense(h1.data(),m.hidden,p.wh,p.bh,raw.data(),3*m.k,false);
+    std::array<int32_t,16> raw{};
+    Split s;split_inputs(f.x.data(),p.d,p.unit_limit,s);
+    first_layer(p,f.x.data(),s,h0.data(),m.hidden);
+    sparse_layer(h0.data(),m.hidden,p.w1t,p.padded,p.bias1,h1.data(),true);
+    sparse_layer(h1.data(),m.hidden,p.wht,p.head_padded,p.biash,raw.data(),false);
     __int128 affine_raw=0;
-    for(int i=0;i<p.d;i++)affine_raw+=__int128(f.x[i])*p.affine[i];
+    if(p.affine_ok){
+        // |u| <= 32767, at most 128 terms, |affine| bounded in Plane::prepare.
+        // Four partial sums shorten the dependency chain; integer sums are exact.
+        int64_t small[4]={0,0,0,0};const int64_t* a=p.affine_padded.data();
+        for(int j=0;j<p.d;j+=4)for(int t=0;t<4;t++)small[t]+=int64_t(s.value[j+t])*a[j+t];
+        affine_raw=__int128((small[0]+small[1])+(small[2]+small[3]))*256;
+    }else{
+        for(int j=0;j<p.d;j++)affine_raw+=__int128(s.value[j])*256*p.affine[size_t(j)];
+    }
+    for(int l=0;l<s.nl;l++)affine_raw+=__int128(f.x[s.large[l]])*p.affine[size_t(s.large[l])];
     affine_raw+=GUIDE_Q/2;
     __int128 affine=affine_raw/GUIDE_Q-(affine_raw%GUIDE_Q<0);
     affine=std::max(-(__int128(1)<<30),std::min(__int128(1)<<30,affine));
