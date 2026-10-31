@@ -318,8 +318,9 @@ struct Model{
 };
 
 // Codes one sample of plane ch at (x, y) with model M. nn() returns the
-// network's stretch for the next bit and nn.take(bit) follows the bit; io(p)
-// codes one bit with probability p/65536 of a one and returns it. Reads only
+// network's stretch for the next bit, or sets nn.forced to a bit that is not
+// coded, and nn.take(bit) follows the bit; io(p, bp) codes bit bp (0 the most
+// significant) with probability p/65536 of a one and returns it. Reads only
 // samples before (x, y) in plane ch, and planes coded before it through row
 // y + 1; writes the sample's network cost.
 struct Coder{
@@ -414,10 +415,11 @@ struct Coder{
                 j=1;const bool one=c0&1;for(int a=0;a<na;a++)cur[a]=M.T.claim(one?nx1[a]:nx0[a]);
             }
             const int st=nn();
+            if(nn.forced>=0){const int bit=nn.forced;nn.take(bit);c0=(c0<<1)|bit;j=(j<<1)|bit;continue;}
             const int gq=std::min(GATE_BUCKETS-1,std::abs(st)>>8);
             if(M.gated&&gq>=GATE_MIN_BUCKET&&M.gate_seen[bp][gq]>=GATE_WARMUP&&
                M.gate_cm[bp][gq]*1000>=M.gate_nn[bp][gq]*(1000-GATE_RATIO)&&((M.gate_count[bp][gq]++)&GATE_PROBE)!=0){
-                const int pn=squash(st);const int bit=io(pn);
+                const int pn=squash(st);const int bit=io(pn,bp);
                 nncost+=int64_t(16)*65536-log2q(uint32_t(bit?pn:65536-pn));
                 nn.take(bit);c0=(c0<<1)|bit;j=(j<<1)|bit;continue;
             }
@@ -458,7 +460,7 @@ struct Coder{
             const int sum=pm+M.a1.pp(fo,c0)+2*M.a2.pp(fo,c0*16+std::min(15,grad))+M.ax[0].pp(fo,c0*256+Wv)+
                           M.ax[1].pp(fo,c0*256+Nv)+M.ax[2].pp(fo,c0*256+mo)+M.ax[3].pp(fo,c0*64+lq*8+conf);
             const int p=std::clamp((sum+4)/8,1,65535);
-            const int bit=io(p);
+            const int bit=io(p,bp);
             {const int pn=squash(st);const int64_t cn=int64_t(16)*65536-log2q(uint32_t(bit?pn:65536-pn));nncost+=cn;
              const int64_t cm=int64_t(16)*65536-log2q(uint32_t(bit?p:65536-p));
              M.gate_nn[bp][gq]+=cn-(M.gate_nn[bp][gq]>>GATE_DECAY);M.gate_cm[bp][gq]+=cm-(M.gate_cm[bp][gq]>>GATE_DECAY);

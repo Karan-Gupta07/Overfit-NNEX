@@ -812,6 +812,37 @@ def test_v5_value_map(coder, monkeypatch):
             coder.decode(bytes(short))
 
 
+def test_v5_bits_of_unused_samples_are_not_coded(coder, monkeypatch):
+    # Each plane uses its own comb, so no shared map packs them.
+    rng = np.random.default_rng(53)
+    pixels = np.stack([k * rng.integers(0, 256 // k, (29, 31)) for k in (3, 2, 5)], axis=2).astype(
+        np.uint8
+    )
+    assert coder.shared_values(pixels) is None
+    payload = v3_model(31, 29, 1, grid=True, scale=0.3)
+    flags = coder.HEADER_SIZE + len(payload) + 1
+    for layout in ("b1", "g2"):
+        blob = coder.encode_v5(pixels, payload, layout=layout)
+        assert blob[flags] & coder.V5_VALUES and blob[flags + 2] == 7
+        assert coder.v5_layout(blob) == layout
+        for threads in (1, 4):
+            monkeypatch.setattr(coder, "THREADS", threads)
+            assert np.array_equal(coder.decode(blob), pixels)
+        for mask in (0, 8):
+            broken = bytearray(blob)
+            broken[flags + 2] = mask
+            with pytest.raises(RuntimeError, match="value map"):
+                coder.decode(bytes(broken))
+    # A plane that uses nearly every sample carries no map.
+    ramp = np.arange(256, dtype=np.uint8).reshape(16, 16)
+    full = np.stack([ramp, ramp, 2 * (ramp // 2)], axis=2)
+    payload = v3_model(16, 16, 1, grid=True, scale=0.3)
+    blob = coder.encode_v5(full, payload, layout="g1")
+    flags = coder.HEADER_SIZE + len(payload) + 1
+    assert blob[flags] & coder.V5_VALUES and blob[flags + 2] == 4
+    assert np.array_equal(coder.decode(blob), full)
+
+
 def test_shared_values_need_one_gapped_set(coder):
     ramp = np.arange(256, dtype=np.uint8).reshape(16, 16)
     assert coder.shared_values(np.stack([ramp] * 3, axis=2)) is None

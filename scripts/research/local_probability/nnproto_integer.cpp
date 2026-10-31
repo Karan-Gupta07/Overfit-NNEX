@@ -1194,22 +1194,41 @@ static void decode_split(const Model& m,Canvas& c,const Bytes& source,int thread
 // NNEX v5 codes either the network's distributions alone (as v4, in row
 // streams) or through a context-mixing model (context_mixing.hpp) whose
 // planes are split into column bands, each with its own model and stream.
-// The body starts with a flags byte (V5_MIXING, V5_GATED), then holds a v4
-// row-stream body or a band count and the band streams, planes G, R, B.
-constexpr uint8_t V5_MIXING=1,V5_GATED=2;
+// The body starts with a flags byte (V5_MIXING, V5_GATED, V5_VALUES), then holds
+// a v4 row-stream body or a band count, with V5_VALUES a mask of planes G, R, B
+// (bits 0 to 2) and a 32-byte bitmap of the samples each of them uses, and the
+// band streams, planes G, R, B.
+constexpr uint8_t V5_MIXING=1,V5_GATED=2,V5_VALUES=4;
 struct V5Layout{uint8_t flags=V5_MIXING|V5_GATED;int count=1;};
+// A plane gets a bitmap when it leaves at least V5_UNUSED samples unused.
+constexpr int V5_UNUSED=8;
+struct V5Values{
+    std::array<std::vector<uint16_t>,3> prefix;
+    const uint16_t* counts(int ch)const{return prefix[size_t(ch)].empty()?nullptr:prefix[size_t(ch)].data();}
+    void set(int ch,const std::array<bool,256>& used){
+        auto& p=prefix[size_t(ch)];p.assign(257,0);
+        for(int v=0;v<256;v++)p[size_t(v+1)]=uint16_t(p[size_t(v)]+(used[size_t(v)]?1:0));
+    }
+};
 // The network's bit probabilities along a coded sample's bits. R and B are
 // coded as (v - G + 128) & 255, a rotation of the network's distribution.
+// With a plane's value counts (valid[v] samples below v that the plane uses),
+// a bit is forced when one side holds no used sample, and is not coded.
 struct NetworkBits{
-    const Distribution& d;int r;bool rotated;int lo=0,hi=256,mid=0;uint32_t clo=0,chi=TOTAL,cr=0,cm=0;
-    NetworkBits(const Distribution& dist,int rotation,bool rot):d(dist),r(rotation),rotated(rot){cr=C(r);}
+    const Distribution& d;int r;bool rotated;const uint16_t* valid;
+    int lo=0,hi=256,mid=0,forced=-1;uint32_t clo=0,chi=TOTAL,cr=0,cm=0;
+    NetworkBits(const Distribution& dist,int rotation,bool rot,const uint16_t* counts)
+        :d(dist),r(rotation),rotated(rot),valid(counts){cr=C(r);}
     uint32_t C(int u)const{return u<=0?0u:u>=256?TOTAL:d.cdf(u);}
     uint32_t F(int u)const{
         if(!rotated)return C(u);if(u<=0)return 0;if(u>=256)return TOTAL;
         return r+u<=256?C(r+u)-cr:TOTAL-cr+C(r+u-256);
     }
+    int V(int t)const{return t<=256?valid[t]:valid[256]+valid[t-256];}
+    int used(int a,int b)const{const int o=rotated?r:0;return V(b+o)-V(a+o);}
     int operator()(){
         mid=(lo+hi)/2;cm=F(mid);
+        if(valid){forced=!used(mid,hi)?0:!used(lo,mid)?1:-1;if(forced>=0)return 0;}
         return v5::clampst((v5::log2q(chi-cm)-v5::log2q(cm-clo))>>8);
     }
     void take(int bit){if(bit){lo=mid;clo=cm;}else{hi=mid;chi=cm;}}
@@ -1235,7 +1254,7 @@ struct V5Planes{
 template<class Wait,class Done,class IO>
 static void code_v5_segment(const Model& m,Canvas& c,V5Planes& planes,v5::Model& M,int ch,int y,
                             int x0,int x1,bool decoding,Wait&& wait,Done&& done,const FitSums& sums,
-                            const FitSums& above,IO&& io){
+                            const FitSums& above,const uint16_t* valid,IO&& io){
     std::array<std::optional<LocalFit>,MAX_FITS> fit;const bool pair=paired(m.windows);
     const v5::Coder coder(planes.p,ch);
     uint8_t* coded=ch==1?c.pixels[1].data():planes.coded[ch].data();
@@ -1258,9 +1277,9 @@ static void code_v5_segment(const Model& m,Canvas& c,V5Planes& planes,v5::Model&
             const uint32_t s=std::max<uint32_t>(d.scales[best],2);const int e=31-__builtin_clz(s);
             planes.scale[ch][i]=uint8_t(std::clamp(2*e+int((s>>(e-1))&1)-20,0,40));
         }
-        NetworkBits nn(d,r,ch!=1);
+        NetworkBits nn(d,r,ch!=1,valid);
         const int value=decoding?0:(int(c.pixels[ch][i])-r)&255;
-        const int v=coder.code(M,x,y,nn,[&](int p){return io(p,value);});
+        const int v=coder.code(M,x,y,nn,[&](int p,int bp){return io(p,(value>>(7-bp))&1);});
         coded[i]=uint8_t(v);
         if(decoding){
             const int sample=(v+r)&255;c.pixels[ch][i]=uint8_t(sample);
@@ -1280,8 +1299,8 @@ static void code_v5_segment(const Model& m,Canvas& c,V5Planes& planes,v5::Model&
 // always proceed.
 constexpr std::array<int,3> V5_ORDER={1,0,2};
 template<class IOFactory>
-static void run_v5(const Model& m,Canvas& c,int bands,bool gated,int threads,bool decoding,
-                   IOFactory&& make_io){
+static void run_v5(const Model& m,Canvas& c,int bands,bool gated,const V5Values& values,int threads,
+                   bool decoding,IOFactory&& make_io){
     V5Planes planes(m,c);const int H=m.h,W=m.w,K=bands,L=bands+1;
     auto start=[&](int b){return int(int64_t(W)*b/K);};
     std::unique_ptr<std::atomic<int>[]> progress(new std::atomic<int>[size_t(3)*H]);
@@ -1323,7 +1342,7 @@ static void run_v5(const Model& m,Canvas& c,int bands,bool gated,int threads,boo
             [&](int x){const int need=std::min(W,x+reach);if(above<need)above=await(ch,y-1,need);},
             [&](int x){progress[size_t(ch)*H+y].store(x+1,std::memory_order_release);},
             decoding?ring.slot(y%slots):FitSums{},decoding?ring.slot((y+slots-1)%slots):FitSums{},
-            make_io(slot*K+b));
+            values.counts(ch),make_io(slot*K+b));
     },&failed);
 }
 static Bytes encode_v5(const Model& m,Canvas& c,V5Layout layout,int threads,bool fitted){
@@ -1340,16 +1359,23 @@ static Bytes encode_v5(const Model& m,Canvas& c,V5Layout layout,int threads,bool
         }
     });
     if(m.fits&&!fitted)fit_image(c,m.windows,threads);
+    V5Values values;Bytes maps{0};
+    for(int s=0;s<3;s++){
+        const int ch=V5_ORDER[size_t(s)];std::array<bool,256> used{};
+        for(const uint8_t v:c.pixels[ch])used[v]=true;
+        if(256-int(std::count(used.begin(),used.end(),true))<V5_UNUSED)continue;
+        maps[0]=uint8_t(maps[0]|(1<<s));values.set(ch,used);
+        for(int k=0;k<32;k++){
+            uint8_t byte=0;for(int t=0;t<8;t++)byte=uint8_t(byte|(used[size_t(8*k+t)]?1<<t:0));
+            maps.push_back(byte);
+        }
+    }
     std::vector<v5::Encoder> coders(size_t(3)*bands);
-    std::vector<int> positions(size_t(3)*bands,0);
-    run_v5(m,c,bands,layout.flags&V5_GATED,threads,false,[&](int s){
-        return [&,s](int p,int value){
-            int& bp=positions[size_t(s)];const int bit=(value>>(7-bp))&1;bp=(bp+1)&7;
-            coders[size_t(s)].put(bit,uint32_t(p));
-            return bit;
-        };
+    run_v5(m,c,bands,layout.flags&V5_GATED,values,threads,false,[&](int s){
+        return [&,s](int p,int bit){coders[size_t(s)].put(bit,uint32_t(p));return bit;};
     });
-    Bytes out{layout.flags,uint8_t(bands)};std::vector<Bytes> parts;
+    Bytes out{uint8_t(layout.flags|(maps[0]?V5_VALUES:0)),uint8_t(bands)};std::vector<Bytes> parts;
+    if(maps[0])out.insert(out.end(),maps.begin(),maps.end());
     for(auto& coder:coders){parts.push_back(coder.finish());put_varint(out,parts.back().size());}
     for(auto& part:parts)out.insert(out.end(),part.begin(),part.end());
     return out;
@@ -1357,20 +1383,33 @@ static Bytes encode_v5(const Model& m,Canvas& c,V5Layout layout,int threads,bool
 static void decode_v5(const Model& m,Canvas& c,const Bytes& source,int threads){
     require(!source.empty(),"truncated arithmetic stream");
     const uint8_t flags=source[0];
-    require(flags==0||flags==V5_MIXING||flags==(V5_MIXING|V5_GATED),"invalid v5 flags");
+    require(flags==0||(flags&V5_MIXING&&flags<=(V5_MIXING|V5_GATED|V5_VALUES)),"invalid v5 flags");
     if(!(flags&V5_MIXING)){
         decode_split(m,c,Bytes(source.begin()+1,source.end()),threads,true);return;
     }
     require(source.size()>=2,"truncated arithmetic stream");
     size_t pos=2;const int bands=source[1];
     require(bands>=1&&bands<=v5_band_limit(m.w),"invalid band count");
+    V5Values values;
+    if(flags&V5_VALUES){
+        require(source.size()>pos,"truncated value map");const uint8_t mask=source[pos++];
+        require(mask>=1&&mask<=7,"invalid value map");
+        for(int s=0;s<3;s++){
+            if(!((mask>>s)&1))continue;
+            require(source.size()>=pos+32,"truncated value map");std::array<bool,256> used{};
+            for(int v=0;v<256;v++)used[size_t(v)]=(source[pos+size_t(v/8)]>>(v%8))&1;
+            pos+=32;
+            require(std::count(used.begin(),used.end(),true)>0,"empty value map");
+            values.set(V5_ORDER[size_t(s)],used);
+        }
+    }
     const size_t count=size_t(3)*bands;
     std::vector<uint64_t> sizes(count);uint64_t total=0;
     for(auto& size:sizes){size=read_varint(source,pos);total+=size;}
     require(total==source.size()-pos,"invalid stream lengths");
     std::vector<v5::Decoder> decoders;
     for(size_t s=0;s<count;s++){decoders.emplace_back(source.data()+pos,size_t(sizes[s]));pos+=sizes[s];}
-    run_v5(m,c,bands,flags&V5_GATED,threads,true,[&](int s){
+    run_v5(m,c,bands,flags&V5_GATED,values,threads,true,[&](int s){
         return [&,s](int p,int){return decoders[size_t(s)].get(uint32_t(p));};
     });
 }

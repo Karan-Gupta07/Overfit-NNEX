@@ -50,8 +50,10 @@ THREADS = 0
 # Version 5 layouts, as nnproto_integer.cpp: "sN" codes the network alone in N
 # row streams (v4 with bounded means), "bN" mixes it with a context model in N
 # column bands per plane, and "gN" also lets that model defer to the network
-# where mixing has not been paying.
+# where mixing has not been paying. Mixing bodies whose planes leave samples
+# unused also set V5_VALUES and skip the bits those samples decide.
 V5_KINDS = {"s": (0, 64), "b": (1, 16), "g": (3, 16)}
+V5_VALUES = 4
 # Native calls; context mixing codes several times slower than the network alone.
 TIMEOUT = 300
 V5_TIMEOUT = 1800
@@ -726,9 +728,12 @@ def v5_layout(blob: bytes) -> str:
     payload = model_payload(blob)
     _, native = _v5_split(blob[HEADER_SIZE + len(payload) :])
     kinds = {flags: kind for kind, (flags, _) in V5_KINDS.items()}
-    if len(native) < 2 or native[0] not in kinds:
+    if len(native) < 2:
         raise ValueError("v5 layout")
-    return f"{kinds[native[0]]}{native[1]}"
+    flags = native[0] & ~V5_VALUES if native[0] & 1 else native[0]
+    if flags not in kinds:
+        raise ValueError("v5 layout")
+    return f"{kinds[flags]}{native[1]}"
 
 
 def model_payload(blob: bytes) -> bytes:
