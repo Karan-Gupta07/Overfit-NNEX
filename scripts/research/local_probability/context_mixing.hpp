@@ -186,6 +186,27 @@ struct Mixer{
         for(size_t k=0;k<N;k++)out[k]=mixers[k].dot(x15,sets[k]);
 #endif
     }
+    // update(x13, sets[k], errors[k]) for mixers of one stride, in one pass over x13.
+    template<size_t N>
+    static void updates(std::array<Mixer,N>& mixers,const std::array<int,N>& sets,
+                        const int32_t* __restrict x13,const int* errors){
+#if defined(__ARM_NEON)
+        int32_t* ww[N];int32x4_t ev[N];int n=0;
+        for(size_t k=0;k<N;k++){
+            const int err=errors[k];if(std::abs(err)<DEAD_ZONE)continue;
+            Mixer& m=mixers[k];const size_t s=size_t(sets[k]);
+            const uint32_t c=m.uses[s];if(c<16383)m.uses[s]=uint16_t(c+1);
+            ww[n]=&m.w[s*m.stride];ev[n]=vdupq_n_s32(err*m.rates[c>>4]);n++;
+        }
+        const int stride=mixers[0].stride;
+        for(int i=0;i<stride;i+=4){
+            const int32x4_t xv=vld1q_s32(x13+i);
+            for(int k=0;k<n;k++)vst1q_s32(ww[k]+i,vaddq_s32(vld1q_s32(ww[k]+i),vqrdmulhq_s32(xv,ev[k])));
+        }
+#else
+        for(size_t k=0;k<N;k++)mixers[k].update(x13,sets[k],errors[k]);
+#endif
+    }
     // x13 = inputs << 13: w += rdmulh(x13, err * rate), wrapping.
     void update(const int32_t* __restrict x13,int s,int err){
         if(std::abs(err)<DEAD_ZONE)return;
@@ -211,6 +232,8 @@ struct APM{
         const int s=std::clamp(st,-4095,4095)+4096;const int j=s>>8;weight=s&255;index=ctx*33+j;
         return (t[size_t(index)]*(256-weight)+t[size_t(index)+1]*weight)>>8;
     }
+    // A row's 66 bytes span at most two 64-byte lines.
+    void prefetch(int ctx)const{const char* p=reinterpret_cast<const char*>(&t[size_t(ctx)*33]);__builtin_prefetch(p);__builtin_prefetch(p+65);}
     void update(int bit){
         const int g=bit?65535:0;uint16_t* e=&t[size_t(index)];
         e[0]=uint16_t(e[0]+((((g-e[0])*(256-weight))>>8)>>7));
@@ -265,8 +288,10 @@ struct Table{
         Bucket* P=pair(h);const uint32_t c=(uint32_t(h>>16)&0xffff)|1;
         uint32_t* s[WAYS];for(int k=0;k<WAYS;k++)s[k]=P[k>>1].s[k&1];
         uint32_t* v=nullptr;
-        for(int k=0;k<WAYS&&!v;k++)if((s[k][0]>>16)==c)v=s[k];
-        if(!v){
+        const unsigned hit=unsigned((s[0][0]>>16)==c)|unsigned((s[1][0]>>16)==c)<<1|
+                           unsigned((s[2][0]>>16)==c)<<2|unsigned((s[3][0]>>16)==c)<<3;
+        if(hit)v=s[__builtin_ctz(hit)];
+        else{
             int m=0;for(int k=1;k<WAYS;k++)if((s[k][0]&0xffff)<(s[m][0]&0xffff))m=k;
             v=s[m];v[0]=c<<16;for(int j=1;j<16;j++)v[j]=NODE_INIT;
         }
@@ -332,7 +357,7 @@ struct Model{
         fin.init(MIXERS,8,MIXER_RATE);for(int q=0;q<8;q++)for(int t=0;t<MIXERS;t++)fin.at(q)[t]=65536/MIXERS;
         blend.init(BLEND_INPUTS+1,256,MIXER_RATE);
         for(int q=0;q<256;q++)for(int t=0;t<BLEND_INPUTS;t++)blend.at(q)[t]=65536/BLEND_INPUTS;
-        a1.init(256*256);a2.init(256*16);for(int t=0;t<3;t++)ax[size_t(t)].init(256*256);ax[3].init(256*64);
+        a1.init(256*256);a2.init(16*256);for(int t=0;t<3;t++)ax[size_t(t)].init(256*256);ax[3].init(256*64);
     }
 };
 
@@ -458,6 +483,12 @@ struct Coder{
                 nncost+=int64_t(16)*65536-log2q(uint32_t(bit?pn:65536-pn));
                 nn.take(bit);c0=(c0<<1)|bit;j=(j<<1)|bit;continue;
             }
+            // Map rows hold one context's bit paths (context * 256 + c0), so a
+            // sample's rows share pages; fetch this bit's rows while it mixes.
+            const int conf=std::min(7,std::abs(st)>>9);
+            const std::array<int,6> rows={errors*256+c0,std::min(15,grad)*256+c0,Wv*256+c0,Nv*256+c0,mo*256+c0,
+                                          (lq*8+conf)*256+c0};
+            M.a1.prefetch(rows[0]);M.a2.prefetch(rows[1]);for(int t=0;t<4;t++)M.ax[size_t(t)].prefetch(rows[size_t(t)+2]);
             xin[0]=st;xin[1]=256;int ni=2;
             for(int a=0;a<na;a++){const uint32_t z=cur[a][j];xin[ni++]=(z&0xff00)?st16(z>>16):0;}
             uint32_t* bix[MAX_CONTEXTS];
@@ -479,7 +510,7 @@ struct Coder{
                 M.mx[5].prefetch((bp+1)*32+std::min(31,sb));
             }
             shifted(xin,ni,x15,x13);
-            const int conf=std::min(7,std::abs(st)>>9);const int pre=c0-(1<<bp);
+            const int pre=c0-(1<<bp);
             auto match=[&](int v){return int((v>>(8-bp))==pre);};
             std::array<int,MIXERS> sidx=fixed;
             sidx[0]=c0;sidx[2]=chroma<0?bp:chroma+(bp>>1);
@@ -492,8 +523,8 @@ struct Coder{
             for(int k=MIXERS;k<MIXER_PAD;k++)gx[k]=0;
             shifted(gx,MIXER_PAD,g15,g13);
             const int fo=M.fin.dot(g15,bp);const int pm=squash(fo);
-            const std::array<int,6> q={M.a1.pp(fo,c0*256+errors),M.a2.pp(fo,c0*16+std::min(15,grad)),M.ax[0].pp(fo,c0*256+Wv),
-                                       M.ax[1].pp(fo,c0*256+Nv),M.ax[2].pp(fo,c0*256+mo),M.ax[3].pp(fo,c0*64+lq*8+conf)};
+            const std::array<int,6> q={M.a1.pp(fo,rows[0]),M.a2.pp(fo,rows[1]),M.ax[0].pp(fo,rows[2]),
+                                       M.ax[1].pp(fo,rows[3]),M.ax[2].pp(fo,rows[4]),M.ax[3].pp(fo,rows[5])};
             const int sum=pm+q[0]+2*q[1]+q[2]+q[3]+q[4]+q[5];
             // The fixed average of the maps, and a mixer of their stretches selected by
             // the bit, the network's recent loss and its confidence.
@@ -509,14 +540,12 @@ struct Coder{
              M.gate_nn[bp][gq]+=cn-(M.gate_nn[bp][gq]>>GATE_DECAY);M.gate_cm[bp][gq]+=cm-(M.gate_cm[bp][gq]>>GATE_DECAY);
              if(M.gate_seen[bp][gq]<(1u<<30))M.gate_seen[bp][gq]++;}
             nn.take(bit);
-            for(int k=0;k<MIXERS;k++){
-                M.mid[size_t(k)].update(h13,sidx[size_t(k)],((bit<<16)-squash(gx[k]))>>4);
-                M.mx[size_t(k)].update(x13,sidx[size_t(k)],((bit<<16)-squash(fx[k]))>>4);
-            }
+            int em[MIXERS],ex[MIXERS];
+            for(int k=0;k<MIXERS;k++){em[k]=((bit<<16)-squash(gx[k]))>>4;ex[k]=((bit<<16)-squash(fx[k]))>>4;}
+            Mixer::updates(M.mid,sidx,h13,em);Mixer::updates(M.mx,sidx,x13,ex);
             M.fin.update(g13,bp,((bit<<16)-pm)>>4);M.blend.update(b13,bsel,((bit<<16)-pb)>>4);
             M.a1.update(bit);M.a2.update(bit);for(auto& a:M.ax)a.update(bit);
-            for(int a=0;a<na;a++)bump(cur[a][j],bit);
-            for(int a=0;a<na;a++)bump32(*bix[a],bit);
+            for(int a=0;a<na;a++){bump(cur[a][j],bit);bump32(*bix[a],bit);}
             c0=(c0<<1)|bit;j=(j<<1)|bit;
         }
         S.cost[ch][i]=uint16_t(std::min<int64_t>(nncost>>12,65535));

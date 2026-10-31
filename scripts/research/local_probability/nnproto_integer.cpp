@@ -1328,11 +1328,8 @@ static void run_v5(const Model& m,Canvas& c,int bands,bool gated,const V5Values&
         models[size_t(ch)][size_t(b)]=std::make_unique<v5::Model>(
             ch,v5::table_bits(uint64_t(start(b+1)-start(b))*H),gated);
     });
-    const int steps=H+K-1+2*L;
-    parallel(steps*3*K,std::min(threads,3*K),[&](int job){
-        const int T=job/(3*K),r=job%(3*K),slot=r/K,b=K-1-r%K;
-        const int ch=V5_ORDER[size_t(slot)],y=T-b-L*slot;
-        if(y<0||y>=H)return;
+    auto code_job=[&](int slot,int b,int y){
+        const int ch=V5_ORDER[size_t(slot)];
         const int x0=start(b),x1=start(b+1);
         if(slot>0)await(V5_ORDER[size_t(slot-1)],std::min(H-1,y+1),W);
         if(y>0)await(ch,y-1,x1);
@@ -1344,6 +1341,19 @@ static void run_v5(const Model& m,Canvas& c,int bands,bool gated,const V5Values&
             [&](int x){progress[size_t(ch)*H+y].store(x+1,std::memory_order_release);},
             decoding?ring.slot(y%slots):FitSums{},decoding?ring.slot((y+slots-1)%slots):FitSums{},
             values.counts(ch),make_io(slot*K+b));
+    };
+    // With a thread per (plane, band) each runs its rows in order; claimed in
+    // order, a thread can trail another on one plane while a third plane waits.
+    if(threads>=3*K){
+        parallel(3*K,3*K,[&](int r){
+            const int slot=r/K,b=K-1-r%K;for(int y=0;y<H;y++)code_job(slot,b,y);
+        },&failed);
+        return;
+    }
+    const int steps=H+K-1+2*L;
+    parallel(steps*3*K,threads,[&](int job){
+        const int T=job/(3*K),r=job%(3*K),slot=r/K,b=K-1-r%K,y=T-b-L*slot;
+        if(y>=0&&y<H)code_job(slot,b,y);
     },&failed);
 }
 static Bytes encode_v5(const Model& m,Canvas& c,V5Layout layout,int threads,bool fitted){
