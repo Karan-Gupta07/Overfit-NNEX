@@ -16,6 +16,7 @@ import itertools
 import json
 import math
 import multiprocessing
+import os
 import queue
 import struct
 import threading
@@ -46,11 +47,24 @@ from semanticcodec.format.serialize import serialize
 MAX_FILE_BYTES = 256 * 1024 * 1024
 # Images over coder.MAX_PIXELS, up to MAX_STRIPS times that, become equal
 # horizontal strips in one STRIPS_MAGIC file. Each strip is a complete SCDX or
-# NNEX file with its own model, and its first rows do not see the strip above.
+# NNEX file with its own model, or a SHARED_MAGIC part, and its first rows do
+# not see the strip above.
 STRIPS_MAGIC = b"NNST\x00\x01"
 MAX_STRIPS = 4
 _STRIPS_HEAD = struct.Struct("<2IB")
 _STRIP = struct.Struct("<2I")
+# A SHARED_MAGIC part is a strip coded with a donor strip's model: the donor's
+# index, then the strip's v5 file less its model payload, which is the donor's
+# (coder.with_height). A strip shares only if its file comes out smaller; it is
+# tried where coding a screen band (screen_mixing) with the donor's model
+# promises to save more than the strip's own model costs. Strip models cost
+# 12 KB to 17 KB each on LPCB. The models of the two PIA13757 strips cost 2% and
+# 4% more stream each than they save across strips; on STA13843, 2% to 4%.
+SHARED_MAGIC = b"NNSH\x00\x01"
+# Strips decode side by side while their context tables (coder.v5_table_bytes)
+# fit in STRIP_MEMORY of the machine's memory: a mixed strip of a 46 MP image
+# allocates 3 GB, and three at once beside other work thrashed a 24 GB machine.
+STRIP_MEMORY = 0.5
 # Raw RGBA samples of the largest image the strips hold, plus a header: an
 # uncompressed PPM of a 46-megapixel LPCB image is 139 MB.
 MAX_SOURCE_BYTES = MAX_STRIPS * coder.MAX_PIXELS * 4 + 4096
@@ -323,13 +337,122 @@ def _decompress_strips(blob: bytes) -> np.ndarray:
         if part.startswith(STRIPS_MAGIC):
             raise ValueError("nested strip file")
         parts.append(part)
+    files = [
+        _unshare(part, parts, rows) if part.startswith(SHARED_MAGIC) else part
+        for (rows, _), part in zip(table, parts, strict=True)
+    ]
     # Strips are independent files, and a mixed strip decodes on only a few
     # threads (one per plane and band), so strips decode side by side.
-    with ThreadPoolExecutor(len(parts)) as pool:
-        strips = list(pool.map(decompress, parts))
+    with ThreadPoolExecutor(strip_decoders(files)) as pool:
+        strips = list(pool.map(decompress, files))
     if any(rgba.shape != (rows, width, 4) for (rows, _), rgba in zip(table, strips, strict=True)):
         raise ValueError("strip shape")
     return np.concatenate(strips, axis=0)
+
+
+def strip_decoders(files: list[bytes]) -> int:
+    """How many strip files decode at once (STRIP_MEMORY)."""
+    tables = max(coder.v5_table_bytes(f) if f.startswith(coder.MAGIC_V5) else 0 for f in files)
+    if not tables:
+        return len(files)
+    memory = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+    return max(1, min(len(files), int(STRIP_MEMORY * memory // tables)))
+
+
+def _unshare(part: bytes, parts: list[bytes], rows: int) -> bytes:
+    """The complete v5 file of a SHARED_MAGIC part of a strip of rows."""
+    position = len(SHARED_MAGIC) + 1
+    donor = part[position - 1] if len(part) >= position else len(parts)
+    rest = part[position:]
+    if (
+        donor >= len(parts)
+        or not parts[donor].startswith(coder.MAGIC_V5)
+        or not rest.startswith(coder.MAGIC_V5)
+        or len(rest) < coder.HEADER_SIZE
+    ):
+        raise ValueError("shared strip model")
+    payload = coder.with_height(coder.model_payload(parts[donor]), rows)
+    return rest[: coder.HEADER_SIZE] + payload + rest[coder.HEADER_SIZE :]
+
+
+def _shared_part(rgb: np.ndarray, own: bytes, index: int, donor: bytes) -> bytes:
+    """rgb, whose own file is own, coded with the model of donor strip index."""
+    payload = coder.with_height(coder.model_payload(donor), rgb.shape[0])
+    values = coder.v5_values(donor)
+    blob = coder.encode_v5(rgb, payload, layout=coder.v5_layout(own), values=values)
+    body = blob[: coder.HEADER_SIZE] + blob[coder.HEADER_SIZE + len(payload) :]
+    return SHARED_MAGIC + bytes([index]) + body
+
+
+def _covers(values, rgb: np.ndarray) -> bool:
+    if values is None:
+        return True
+    used = np.zeros(256, bool)
+    used[values] = True
+    return bool(used[rgb].all())
+
+
+def share_models(
+    strips: list[np.ndarray], parts: list[tuple[int, bytes]]
+) -> tuple[list[tuple[int, bytes]], dict]:
+    """parts with some strips coded with one donor strip's model (SHARED_MAGIC).
+
+    Every v5 strip is a possible donor; the one whose screens promise the most
+    in total donates to each strip it promises to save bytes on, if the shared
+    part comes out smaller.
+    """
+    files = [blob for _, blob in parts]
+    eligible = [k for k, blob in enumerate(files) if blob.startswith(coder.MAGIC_V5)]
+    report: dict = {"screens": [], "donor": None, "shared": []}
+    if len(eligible) < 2:
+        return parts, report
+    rgbs = {k: np.ascontiguousarray(strips[k][..., :3]) for k in eligible}
+    layouts = {k: coder.v5_layout(files[k]) for k in eligible}
+    values = {k: coder.v5_values(files[k]) for k in eligible}
+    models = {k: coder.model_payload(files[k]) for k in eligible}
+    pairs = [
+        (donor, k)
+        for donor in eligible
+        for k in eligible
+        if donor != k and _covers(values[donor], rgbs[k])
+    ]
+    jobs = [(k, k) for k in eligible] + pairs
+    # Mixed strips also code side by side in screen_mixing; bands are small.
+    with ThreadPoolExecutor(4) as pool:
+        bands = dict(
+            zip(
+                jobs,
+                pool.map(
+                    lambda job: band_stream_bytes(
+                        rgbs[job[1]], models[job[0]], layouts[job[1]], values[job[0]]
+                    ),
+                    jobs,
+                ),
+                strict=True,
+            )
+        )
+    gains = {}
+    for donor, k in pairs:
+        rows = screen_band(rgbs[k].shape[0])[2]
+        scale = rgbs[k].shape[0] / rows
+        gains[donor, k] = (bands[k, k] - bands[donor, k]) * scale + len(models[k])
+        report["screens"].append(
+            {"donor": donor, "strip": k, "estimated_saving": round(gains[donor, k])}
+        )
+    totals = {d: sum(max(0.0, g) for (e, _), g in gains.items() if e == d) for d in eligible}
+    donor = max(totals, key=lambda d: totals[d])
+    if totals[donor] <= 0:
+        return parts, report
+    report["donor"] = donor
+    shared = list(parts)
+    for (d, k), gain in gains.items():
+        if d != donor or gain <= 0:
+            continue
+        part = _shared_part(rgbs[k], files[k], donor, files[donor])
+        report["shared"].append({"strip": k, "own": len(files[k]), "shared": len(part)})
+        if len(part) < len(files[k]):
+            shared[k] = (parts[k][0], part)
+    return shared, report
 
 
 def _compress_strips(path: Path, pixels: np.ndarray, options: dict) -> tuple[bytes, dict]:
@@ -337,7 +460,7 @@ def _compress_strips(path: Path, pixels: np.ndarray, options: dict) -> tuple[byt
     start = time.perf_counter()
     height, width = pixels.shape[:2]
     rows = strip_rows(width, height)
-    parts, reports = [], []
+    parts, reports, tiles = [], [], []
     with coder.temporary_directory() as directory:
         for index, top in enumerate(range(0, height, rows), 1):
             strip = np.ascontiguousarray(pixels[top : top + rows])
@@ -348,6 +471,10 @@ def _compress_strips(path: Path, pixels: np.ndarray, options: dict) -> tuple[byt
             blob, report = compress(target, **{**options, "check": False})
             parts.append((strip.shape[0], blob))
             reports.append(report)
+            tiles.append(strip)
+    mark = time.perf_counter()
+    parts, sharing = share_models(tiles, parts)
+    share_seconds = time.perf_counter() - mark
     best = pack_strips(width, parts)
     if pixels.shape[2] == 3:
         rgba = np.concatenate([pixels, np.full((height, width, 1), 255, np.uint8)], axis=2)
@@ -376,10 +503,12 @@ def _compress_strips(path: Path, pixels: np.ndarray, options: dict) -> tuple[byt
         "complete_file_bytes": len(best),
         "selected": {"format": "strips", "count": len(parts)},
         "strips": strips,
+        "shared_models": sharing,
         "exact_rgba": True,
         "seconds": time.perf_counter() - start,
         "phase_seconds": {
             **{f"strip-{k}": round(row["seconds"], 2) for k, row in enumerate(strips, 1)},
+            "share-models": round(share_seconds, 2),
             "final-check": round(check_seconds, 2),
         },
         "warning": reports[0]["warning"],
@@ -410,6 +539,33 @@ def _stream_bytes(blob: bytes) -> int:
     return len(blob) - coder.HEADER_SIZE - len(coder.model_payload(blob))
 
 
+def screen_band(h: int) -> tuple[int, int, int]:
+    """(top, lead, rows) of the band screens code: rows after lead rows of lead-in from top.
+
+    The band is centred, and its first row is even, keeping the network's
+    parity features.
+    """
+    rows = max(1, h // MIX_CROP)
+    lead = min(SCREEN_LEAD, (h - rows) // 2 * 2)
+    return (h - rows - lead) // 2 // 2 * 2, lead, rows
+
+
+def _top_stream_bytes(rgb: np.ndarray, top: int, count: int, layout: str, model: bytes, values):
+    """Stream bytes of count rows of rgb from top, coded with model in layout."""
+    if count == 0:
+        return 0
+    part = np.ascontiguousarray(rgb[top : top + count])
+    payload = coder.with_height(model, count)
+    return _stream_bytes(coder.encode_v5(part, payload, layout=layout, values=values))
+
+
+def band_stream_bytes(rgb: np.ndarray, model: bytes, layout: str, values) -> int:
+    """Stream bytes of screen_band's band of rgb, less those of its lead-in alone."""
+    top, lead, rows = screen_band(rgb.shape[0])
+    whole = _top_stream_bytes(rgb, top, lead + rows, layout, model, values)
+    return whole - _top_stream_bytes(rgb, top, lead, layout, model, values)
+
+
 def screen_mixing(
     rgb: np.ndarray, network: bytes, payload: bytes, values, layout: str = "g1"
 ) -> dict:
@@ -418,26 +574,16 @@ def screen_mixing(
     The band follows up to SCREEN_LEAD rows of lead-in, whose own bytes are
     subtracted. Its first row is even, keeping the network's parity features.
     """
-    h = rgb.shape[0]
-    rows = max(1, h // MIX_CROP)
-    lead = min(SCREEN_LEAD, (h - rows) // 2 * 2)
-    top = (h - rows - lead) // 2 // 2 * 2
-
-    def size(count: int, kind: str, model: bytes) -> int:
-        if count == 0:
-            return 0
-        part = np.ascontiguousarray(rgb[top : top + count])
-        header, planes = coder.parse_v3(model)
-        model = coder.encode_model((header[0], count, *header[2:]), planes)
-        return _stream_bytes(coder.encode_v5(part, model, layout=kind, values=values))
-
+    top, lead, rows = screen_band(rgb.shape[0])
     jobs = [
         (count, kind, model)
         for kind, model in (("s1", network), (layout, payload))
         for count in (lead + rows, lead)
     ]
     with ThreadPoolExecutor(len(jobs)) as pool:
-        whole, alone, mixed, mixed_alone = pool.map(lambda job: size(*job), jobs)
+        whole, alone, mixed, mixed_alone = pool.map(
+            lambda job: _top_stream_bytes(rgb, top, *job, values), jobs
+        )
     return {
         "rows": rows,
         "lead": lead,

@@ -115,6 +115,58 @@ def test_strip_files_are_bounds_checked(experiment, tmp_path, monkeypatch):
             experiment.decompress(corrupt)
 
 
+def test_strips_can_share_one_model(experiment, tmp_path, monkeypatch):
+    monkeypatch.setattr(experiment.coder, "MAX_PIXELS", 40)
+    pixels = np.random.default_rng(61).integers(0, 256, (12, 5, 3), np.uint8)
+    rgba = np.concatenate([pixels, np.full((12, 5, 1), 255, np.uint8)], axis=2)
+    parts, strips = [], []
+    for top in (0, 6):
+        strip = np.ascontiguousarray(pixels[top : top + 6])
+        path = tmp_path / f"strip-{top}.png"
+        Image.fromarray(strip).save(path)
+        blob, _ = experiment.compress(
+            path,
+            widths=(4,),
+            feature_sets=(1,),
+            epochs=0,
+            device="cpu",
+            conventional=False,
+            hybrid=False,
+            check=False,
+        )
+        parts.append((6, blob))
+        strips.append(strip)
+    shared = experiment._shared_part(strips[1], parts[1][1], 0, parts[0][1])
+    assert shared.startswith(experiment.SHARED_MAGIC)
+    assert len(shared) < len(parts[1][1])
+    blob = experiment.pack_strips(5, [parts[0], (6, shared)])
+    assert np.array_equal(experiment.decompress(blob), rgba)
+    head = len(experiment.SHARED_MAGIC)
+    for donor in (1, 2):
+        wrong = shared[:head] + bytes([donor]) + shared[head + 1 :]
+        with pytest.raises(ValueError, match="shared strip model"):
+            experiment.decompress(experiment.pack_strips(5, [parts[0], (6, wrong)]))
+    for truncated in (shared[:head], shared[: head + 1 + 8]):
+        with pytest.raises(ValueError, match="shared strip model"):
+            experiment.decompress(experiment.pack_strips(5, [parts[0], (6, truncated)]))
+    files = [blob for _, blob in parts]
+    tables = max(experiment.coder.v5_table_bytes(f) for f in files)
+    assert experiment.strip_decoders(files) == (2 if tables else 2)
+    monkeypatch.setattr(experiment, "STRIP_MEMORY", 0.0)
+    assert experiment.strip_decoders(files) == (1 if tables else 2)
+    assert np.array_equal(experiment.decompress(blob), rgba)
+    chosen, report = experiment.share_models(strips, parts)
+    assert len(report["screens"]) == 2
+    assert np.array_equal(experiment.decompress(experiment.pack_strips(5, chosen)), rgba)
+    # Screens that promise the model bytes code the shared parts.
+    monkeypatch.setattr(experiment, "band_stream_bytes", lambda *args: 0)
+    chosen, report = experiment.share_models(strips, parts)
+    donor = report["donor"]
+    assert donor is not None and chosen[donor] == parts[donor]
+    assert chosen[1 - donor][1].startswith(experiment.SHARED_MAGIC)
+    assert np.array_equal(experiment.decompress(experiment.pack_strips(5, chosen)), rgba)
+
+
 def test_no_candidate_is_an_error(experiment, tmp_path):
     path = tmp_path / "source.png"
     Image.new("RGB", (5, 7)).save(path)

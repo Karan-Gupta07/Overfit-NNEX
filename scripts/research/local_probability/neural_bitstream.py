@@ -679,13 +679,22 @@ def encode_v4(
     return MAGIC_V4 + struct.pack("<2I", len(payload), len(stream)) + digest + payload + stream
 
 
+# Planes code ranks among the samples all planes use if that set has interior
+# gaps and each plane uses at least SHARED_SHARE of it. Ranks among the union
+# saved 6.5 KB (0.75%) on PIA13914, whose planes use 94% to 98% of theirs, and
+# 84 KB (1.3%) on the last strip of PIA13912 (99%), but cost 0.3% to 0.5% on
+# PIA13815 and PIA13882 (39% and 75% at least).
+SHARED_SHARE = 0.9
+
+
 def shared_values(pixels: np.ndarray):
-    """Sorted sample values if every plane uses the same set and it has interior gaps."""
+    """Sorted sample values of all planes together, if planes share them (SHARED_SHARE)."""
     used = [np.bincount(pixels[..., c].ravel(), minlength=256) > 0 for c in range(3)]
-    if not (np.array_equal(used[0], used[1]) and np.array_equal(used[0], used[2])):
+    union = used[0] | used[1] | used[2]
+    values = np.flatnonzero(union).astype(np.uint8)
+    if int(values[-1]) - int(values[0]) + 1 == len(values):
         return None
-    values = np.flatnonzero(used[0]).astype(np.uint8)
-    return values if int(values[-1]) - int(values[0]) + 1 > len(values) else None
+    return values if min(int(u.sum()) for u in used) >= SHARED_SHARE * len(values) else None
 
 
 def pack_values(pixels: np.ndarray, values: np.ndarray) -> np.ndarray:
@@ -771,6 +780,38 @@ def v5_layout(blob: bytes) -> str:
     if flags not in kinds:
         raise ValueError("v5 layout")
     return f"{kinds[flags]}{native[1]}"
+
+
+# Context-table bits of a v5 band model, as context_mixing.hpp's table_bits.
+V5_TABLE_BITS = (16, 22)
+
+
+def v5_table_bytes(blob: bytes) -> int:
+    """Bytes of context tables (128-byte buckets) that coding a v5 file allocates."""
+    layout = v5_layout(blob)
+    if layout[0] == "s":
+        return 0
+    (w, h, *_), _ = parse_v3(model_payload(blob))
+    bands = int(layout[1:])
+    total = 0
+    for band in range(bands):
+        samples = (w * (band + 1) // bands - w * band // bands) * h
+        bits = V5_TABLE_BITS[0]
+        while bits < V5_TABLE_BITS[1] and 1 << bits < samples:
+            bits += 1
+        total += 3 * 128 << bits
+    return total
+
+
+def v5_values(blob: bytes):
+    """The sorted sample values a v5 file codes ranks among, or None."""
+    return _v5_split(blob[HEADER_SIZE + len(model_payload(blob)) :])[0]
+
+
+def with_height(payload: bytes, h: int) -> bytes:
+    """The v3 model payload for an image of h rows."""
+    header, planes = parse_v3(payload)
+    return encode_model((header[0], h, *header[2:]), planes, payload[0])
 
 
 def model_payload(blob: bytes) -> bytes:

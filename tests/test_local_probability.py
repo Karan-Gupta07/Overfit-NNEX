@@ -874,12 +874,25 @@ def test_v5_bits_of_unused_samples_are_not_coded(coder, monkeypatch):
     assert np.array_equal(coder.decode(blob), full)
 
 
-def test_shared_values_need_one_gapped_set(coder):
+def test_v5_table_bytes_follow_the_band_models(coder):
+    pixels = np.random.default_rng(67).integers(0, 256, (7, 32, 3), np.uint8)
+    payload = v3_model(32, 7, 1, grid=True, scale=0.3)
+    assert coder.v5_table_bytes(coder.encode_v5(pixels, payload, layout="s2")) == 0
+    blob = coder.encode_v5(pixels, payload, layout="g2")
+    assert coder.v5_table_bytes(blob) == 2 * 3 * 128 << coder.V5_TABLE_BITS[0]
+
+
+def test_shared_values_need_planes_to_share_a_gapped_set(coder):
     ramp = np.arange(256, dtype=np.uint8).reshape(16, 16)
     assert coder.shared_values(np.stack([ramp] * 3, axis=2)) is None
     sparse = (ramp // 2 * 2).astype(np.uint8)
     assert coder.shared_values(np.stack([sparse, sparse, ramp], axis=2)) is None
     assert len(coder.shared_values(np.stack([sparse] * 3, axis=2))) == 128
+    # The union is shared while every plane uses SHARED_SHARE of it.
+    missing = np.where(sparse == 8, 10, sparse).astype(np.uint8)
+    assert len(coder.shared_values(np.stack([sparse, missing, sparse], axis=2))) == 128
+    quarter = (ramp // 4 * 4).astype(np.uint8)
+    assert coder.shared_values(np.stack([sparse, quarter, sparse], axis=2)) is None
     with pytest.raises(ValueError, match="value map"):
         coder.pack_values(np.stack([ramp] * 3, axis=2), np.arange(0, 256, 2, dtype=np.uint8))
 
