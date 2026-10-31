@@ -143,20 +143,32 @@ stopping after the first file that grows. Every file is independently
 verified before it is kept. Quantized tensors are entropy-coded exact binary16
 values; these labels are **not literal packed-integer tensor formats**.
 
-With v5 (the default), images whose three planes use the same set of sample
-values with gaps train on and code each sample's rank in that set. The
-smallest learned file then codes again through a context-mixing model
-(`context_mixing.hpp`): the network's probability of every bit is one input to
-gated mixers beside hashed context nodes and bit histories. The mixed file is
-kept if it saves at least 0.002 bytes per pixel, because it decodes several
-times slower. The model it mixes comes from a second weight search that
-counts 30% of each network stream bit, since the context model makes up most
-of what coarser weights cost the network; that model is also coded alone as
-one more finalist. Images over 2,000,000 pixels first code a centred band of a
-32nd of their rows, after 32 rows of lead-in whose bytes are subtracted, with
-the best network alone and mixed, and skip mixing unless it saves 0.001 bytes
-per pixel there. Images up to 1,000,000 pixels try ungated and gated mixing;
-images over 8,000,000 pixels mix in two column bands per plane.
+With v5 (the default), images whose sample values leave gaps, and whose
+planes each use at least 90% of the values all three use, train on and code
+each sample's rank in that set. The smallest learned file then codes again
+through a context-mixing model (`context_mixing.hpp`): the network's
+probability of every bit is one input to gated mixers beside hashed context
+nodes and bit histories, followed by a second mixer layer, adaptive
+probability maps and a learned blend. Its contexts include the runs of equal
+samples that end at the sample from the left and from above, and the network's
+recent errors (coded sample less its most likely value) around the sample. A
+plane that leaves at least eight sample values unused also skips every bit
+that its used values decide. The mixed file is kept if it saves at least 0.002
+bytes per pixel, because it decodes several times slower. The model it mixes
+comes from a second weight search that counts 30% of each network stream bit,
+since the context model makes up most of what coarser weights cost the
+network; that model is also coded alone as one more finalist. Every width that
+finished training mixes, and the candidates code side by side while their
+context tables fit in half the machine's memory. Images over 2,000,000 pixels
+first code a centred band of a 32nd of their rows, after 32 rows of lead-in
+whose bytes are subtracted, with the best network alone and mixed, and skip
+mixing unless it saves 0.001 bytes per pixel there. Images up to 1,000,000
+pixels try ungated and gated mixing; images over 8,000,000 pixels mix in two
+column bands per plane. R and B planes that nearly repeat G (under one bit per
+sample of order-0 entropy in their difference from G) are also coded with
+their networks cut to a constant, which wins on grey images. A strip of an
+image over the pixel limit may code with another strip's model instead of its
+own when that file comes out smaller.
 
 Each width trains in its own spawned process while the parent builds the SCDX
 floor; `--serial` trains one at a time and writes the same bytes. The native
@@ -305,9 +317,15 @@ map (a zero byte, or a one byte and a 256-bit set of the sample values whose
 ranks the network codes), then a flags byte. Flags 0 is followed by a v4 row
 stream body. Flags 1 (mixing) or 3 (gated mixing) is followed by a band count
 and the varint lengths and binary arithmetic streams of planes G, R and B,
-band by band; R and B are coded as differences from G. The model
-transmits each fixed-shape tensor as raw binary16 or as Rice-coded integers on a
-power-of-two grid (one per tensor, column, or row) that decode to identical
+band by band; R and B are coded as differences from G. Flag 4 (with 1 or 3)
+puts a plane mask (bits 0 to 2 for G, R, B) and a 32-byte bitmap of the values
+each masked plane uses after the band count; bits those values decide are not
+coded. A strip file (magic `NNST`) holds complete SCDX or NNEX files, one per
+horizontal strip, behind its width, height, strip count and each strip's rows
+and length; a part with magic `NNSH` is a strip coded with another strip's
+model: that strip's index, then the strip's v5 file less its model payload.
+The model transmits each fixed-shape tensor as raw binary16 or as Rice-coded
+integers on a power-of-two grid (one per tensor, column, or row) that decode to identical
 binary16 values. Model format 2 codes an all-zero column or row with one
 reserved grid shift; format 1 payloads still decode. V2 differs only in
 its zstd-compressed canonical CBOR model and lack of feature sets. The 46-byte
