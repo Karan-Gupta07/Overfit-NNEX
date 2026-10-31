@@ -792,6 +792,14 @@ def v5_table_bytes(blob: bytes) -> int:
     if layout[0] == "s":
         return 0
     (w, h, *_), _ = parse_v3(model_payload(blob))
+    return layout_table_bytes(w, h, layout)
+
+
+def layout_table_bytes(w: int, h: int, layout: str) -> int:
+    """Bytes of context tables that coding w by h pixels in a v5 layout allocates."""
+    check_layout(layout)
+    if layout[0] == "s":
+        return 0
     bands = int(layout[1:])
     total = 0
     for band in range(bands):

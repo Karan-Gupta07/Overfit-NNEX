@@ -350,13 +350,33 @@ def _decompress_strips(blob: bytes) -> np.ndarray:
     return np.concatenate(strips, axis=0)
 
 
+def _memory() -> int:
+    return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+
+
 def strip_decoders(files: list[bytes]) -> int:
     """How many strip files decode at once (STRIP_MEMORY)."""
     tables = max(coder.v5_table_bytes(f) if f.startswith(coder.MAGIC_V5) else 0 for f in files)
     if not tables:
         return len(files)
-    memory = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
-    return max(1, min(len(files), int(STRIP_MEMORY * memory // tables)))
+    return max(1, min(len(files), int(STRIP_MEMORY * _memory() // tables)))
+
+
+def parallel_coders(shape: tuple[int, ...], layouts, jobs: int) -> int:
+    """How many of jobs v5 encodes of an image of shape in layouts run at once.
+
+    A mixed encode runs one thread per plane and band, so several share the
+    cores while their context tables fit in STRIP_MEMORY of the machine's
+    memory. A network-only encode uses every core.
+    """
+    h, w = shape[:2]
+    cores = os.cpu_count() or 1
+    threads = max(cores if kind[0] == "s" else 3 * int(kind[1:]) for kind in layouts)
+    tables = max(coder.layout_table_bytes(w, h, kind) for kind in layouts)
+    count = min(jobs, cores // threads)
+    if tables:
+        count = min(count, int(STRIP_MEMORY * _memory() // tables))
+    return max(1, count)
 
 
 def _unshare(part: bytes, parts: list[bytes], rows: int) -> bytes:
@@ -594,30 +614,48 @@ def screen_mixing(
 
 
 def _mix(
-    rgb: np.ndarray, network: bytes, payload: bytes, values, fits, best: int
-) -> tuple[bytes | None, dict]:
-    """The smallest context-mixing file of a model payload, if it saves enough over best.
+    rgb: np.ndarray, network: bytes, models: list[tuple[bytes, object]], values, best: int
+) -> list[tuple[bytes | None, dict]]:
+    """Per (payload, fits) of models, its smallest mixed file if that saves enough over best.
 
-    network is the payload of the best learned file, which codes the network alone.
+    network is the payload of the best learned file, which codes the network
+    alone. The models and layouts code side by side (parallel_coders).
     """
     pixels = rgb.shape[0] * rgb.shape[1]
-    report: dict = {"layouts": []}
+    layouts = mixing_layouts(pixels)
+    reports: list[dict] = [{"layouts": []} for _ in models]
     if pixels > SCREEN_MIX:
         # Screened with the image's own (banded) layout: two bands cost about 0.8%.
-        layout = mixing_layouts(pixels)[-1]
-        report["screen"] = screen_mixing(rgb, network, payload, values, layout)
-        screen = report["screen"]
-        if screen["network"] - screen["mixed"] < MIX_SCREEN * screen["pixels"]:
-            return None, report
-    mixed = None
-    for layout in mixing_layouts(pixels):
-        candidate = coder.encode_v5(rgb, payload, layout=layout, values=values, fits=fits)
-        report["layouts"].append({"layout": layout, "complete_file_bytes": len(candidate)})
-        if mixed is None or len(candidate) < len(mixed):
-            mixed = candidate
-    if mixed is None or best - len(mixed) < MIX_GAIN * pixels:
-        return None, report
-    return mixed, report
+        with ThreadPoolExecutor(len(models)) as pool:
+            screens = pool.map(
+                lambda model: screen_mixing(rgb, network, model[0], values, layouts[-1]), models
+            )
+            for report, screen in zip(reports, screens, strict=True):
+                report["screen"] = screen
+    jobs = [
+        (k, layout)
+        for k, report in enumerate(reports)
+        if "screen" not in report
+        or report["screen"]["network"] - report["screen"]["mixed"]
+        >= MIX_SCREEN * report["screen"]["pixels"]
+        for layout in layouts
+    ]
+    mixed: list[bytes | None] = [None] * len(models)
+    with ThreadPoolExecutor(parallel_coders(rgb.shape, layouts, len(jobs))) as pool:
+        blobs = pool.map(
+            lambda job: coder.encode_v5(
+                rgb, models[job[0]][0], layout=job[1], values=values, fits=models[job[0]][1]
+            ),
+            jobs,
+        )
+        for (k, layout), candidate in zip(jobs, blobs, strict=True):
+            reports[k]["layouts"].append({"layout": layout, "complete_file_bytes": len(candidate)})
+            if mixed[k] is None or len(candidate) < len(mixed[k]):
+                mixed[k] = candidate
+    return [
+        (blob if blob is not None and best - len(blob) >= MIX_GAIN * pixels else None, report)
+        for blob, report in zip(mixed, reports, strict=True)
+    ]
 
 
 def gray_planes(rgb: np.ndarray) -> tuple[int, ...]:
@@ -648,19 +686,29 @@ def _constant_gray(
     model = coder.model_payload(source)
     report: dict = {"planes": list(planes), "layouts": []}
 
-    def code(payload: bytes, kind: str, fold: bool) -> bytes:
-        blob = coder.encode_v5(rgb, payload, layout=kind, values=values, fits=fits)
-        report["layouts"].append({"layout": kind, "fold": fold, "complete_file_bytes": len(blob)})
-        return blob
+    def code(jobs: list[tuple[bool, str]]) -> list[bytes]:
+        coders = parallel_coders(rgb.shape, [kind for _, kind in jobs], len(jobs))
+        with ThreadPoolExecutor(coders) as pool:
+            blobs = list(
+                pool.map(
+                    lambda job: coder.encode_v5(
+                        rgb, payloads[job[0]], layout=job[1], values=values, fits=fits
+                    ),
+                    jobs,
+                )
+            )
+        for (fold, kind), blob in zip(jobs, blobs, strict=True):
+            row = {"layout": kind, "fold": fold, "complete_file_bytes": len(blob)}
+            report["layouts"].append(row)
+        return blobs
 
     payloads = {fold: coder.constant_planes(model, planes, fold) for fold in (False, True)}
-    coded = {fold: code(payload, layout, fold) for fold, payload in payloads.items()}
+    coded = dict(zip((False, True), code([(False, layout), (True, layout)]), strict=True))
     fold = min(coded, key=lambda key: len(coded[key]))
     smallest = coded[fold] if len(coded[fold]) < best else None
     if layout.startswith("s"):
         limit = min(best, len(coded[fold])) - MIX_GAIN * pixels
-        for kind in mixing_layouts(pixels):
-            candidate = code(payloads[fold], kind, fold)
+        for candidate in code([(fold, kind) for kind in mixing_layouts(pixels)]):
             if len(candidate) < min(limit, len(smallest) if smallest else best):
                 smallest = candidate
     return smallest, report
@@ -1122,10 +1170,10 @@ def compress(
             network = coder.model_payload(blob)
             models = sorted(mixing_models, key=lambda row: row[0]) or [(0.0, labels, network)]
             mixing = {"layouts": [], "screens": []}
-            floor_bytes, smallest = len(best), None
-            for _estimate, labels, payload in models:
-                fits = local.get(labels["feature_set"])
-                mixed, tried = _mix(rgb, network, payload, values, fits, floor_bytes)
+            smallest = None
+            jobs = [(payload, local.get(labels["feature_set"])) for _, labels, payload in models]
+            results = _mix(rgb, network, jobs, values, len(best))
+            for (_estimate, labels, _payload), (mixed, tried) in zip(models, results, strict=True):
                 for row in tried["layouts"]:
                     candidates.append({**labels, **row})
                     mixing["layouts"].append({"hidden": labels["hidden"], **row})

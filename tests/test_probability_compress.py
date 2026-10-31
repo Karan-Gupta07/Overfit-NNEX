@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -152,8 +153,13 @@ def test_strips_can_share_one_model(experiment, tmp_path, monkeypatch):
     files = [blob for _, blob in parts]
     tables = max(experiment.coder.v5_table_bytes(f) for f in files)
     assert experiment.strip_decoders(files) == (2 if tables else 2)
+    cores = os.cpu_count() or 1
+    assert experiment.parallel_coders((7, 32, 3), ["b1", "g1"], 4) == max(1, min(4, cores // 3))
+    assert experiment.parallel_coders((7, 32, 3), ["s16", "g1"], 2) == 1
+    assert experiment.parallel_coders((7, 32, 3), ["g1"], 0) == 1
     monkeypatch.setattr(experiment, "STRIP_MEMORY", 0.0)
     assert experiment.strip_decoders(files) == (1 if tables else 2)
+    assert experiment.parallel_coders((7, 32, 3), ["b1", "g1"], 4) == 1
     assert np.array_equal(experiment.decompress(blob), rgba)
     chosen, report = experiment.share_models(strips, parts)
     assert len(report["screens"]) == 2

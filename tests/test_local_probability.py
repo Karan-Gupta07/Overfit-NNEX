@@ -880,6 +880,11 @@ def test_v5_table_bytes_follow_the_band_models(coder):
     assert coder.v5_table_bytes(coder.encode_v5(pixels, payload, layout="s2")) == 0
     blob = coder.encode_v5(pixels, payload, layout="g2")
     assert coder.v5_table_bytes(blob) == 2 * 3 * 128 << coder.V5_TABLE_BITS[0]
+    assert coder.layout_table_bytes(32, 7, "g2") == coder.v5_table_bytes(blob)
+    assert coder.layout_table_bytes(32, 7, "s2") == 0
+    assert coder.layout_table_bytes(4096, 4096, "b1") == 3 * 128 << coder.V5_TABLE_BITS[1]
+    with pytest.raises(ValueError):
+        coder.layout_table_bytes(32, 7, "x1")
 
 
 def test_shared_values_need_planes_to_share_a_gapped_set(coder):
