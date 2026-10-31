@@ -102,7 +102,8 @@ python scripts/research/local_probability/compress.py data/probe/image.coded \
 ```
 
 The output is the winning complete file, unchanged: either SCDX or integer
-NNEX v4 (`--envelope 3` writes v3). Older NNEX v2 and v3 files still decode.
+NNEX v5 (`--envelope 4` writes v4, `--envelope 3` v3). Older NNEX v2, v3 and
+v4 files still decode.
 There is no extra selection envelope. Use this research decoder for NNEX
 outputs.
 
@@ -126,7 +127,10 @@ With MPS, a fused Metal trainer runs the steps, then a quantization-aware
 snapshot on 12-bit grids. An estimated per-plane search picks each tensor's
 grid (one grid, or one per column or row) and codes the searched model
 as a complete file, plus the best uniform-grid model when its estimate is within
-0.05%. Parallel widths race: after a 32nd of their epochs only widths
+0.05%. Estimates spend bits as the integer coder does: its logistic is exactly
+0 or 1 beyond ±16, and every value keeps one of 2^20 counts. (Training's
+objective clamps the mass of the coded range instead, which comes out negative
+for means far below the range, and searches that used it chose such roundings.) Parallel widths race: after a 32nd of their epochs only widths
 whose estimate (recent mean training bits plus 10-bit model bytes) is within
 3% of the best keep training. The PyTorch path (`--torch-training`)
 instead tries weight grids labelled 16/12/10/8/7/6 bits, in that order,
@@ -134,10 +138,27 @@ stopping after the first file that grows. Every file is independently
 verified before it is kept. Quantized tensors are entropy-coded exact binary16
 values; these labels are **not literal packed-integer tensor formats**.
 
+With v5 (the default), images whose three planes use the same set of sample
+values with gaps train on and code each sample's rank in that set. The
+smallest learned file then codes again through a context-mixing model
+(`context_mixing.hpp`): the network's probability of every bit is one input to
+gated mixers beside hashed context nodes and bit histories. The mixed file is
+kept if it saves at least 0.002 bytes per pixel, because it decodes several
+times slower. The model it mixes comes from a second weight search that
+counts 30% of each network stream bit, since the context model makes up most
+of what coarser weights cost the network; that model is also coded alone as
+one more finalist. Images over 2,000,000 pixels first code a centred band of a
+32nd of their rows, after 32 rows of lead-in whose bytes are subtracted, with
+the best network alone and mixed, and skip mixing unless it saves 0.001 bytes
+per pixel there. Images up to 1,000,000 pixels try ungated and gated mixing;
+images over 8,000,000 pixels mix in two column bands per plane.
+
 Each width trains in its own spawned process while the parent builds the SCDX
 floor; `--serial` trains one at a time and writes the same bytes. The native
-backend evaluates encoder probabilities on all cores and decodes v4 files with
-a multithreaded row wavefront; `--threads N` caps both (0 chooses).
+backend evaluates encoder probabilities on all cores and decodes v4 and
+network-only v5 files with a multithreaded row wavefront; a mixed v5 file
+decodes its planes G, R and B (and their bands) on concurrent threads, each a
+few rows behind the last. `--threads N` caps both (0 chooses).
 `--compile-training` is faster on MPS but trains slightly different models, so
 it is a different encoder setting rather than a speedup of the default. On six
 known development images it cut encode time by about a third and changed the
@@ -273,7 +294,13 @@ row-major raw RGB, compact canonical model, arithmetic stream. NNEX v4 is
 identical except that the stream is split into up to 64 row substreams (row y
 in substream y mod S, default S = 16) behind a one-byte count and varint
 lengths, so rows can decode in parallel. The probabilities are the v3
-probabilities. The model
+probabilities. NNEX v5 has the v3 header and model; its network bounds each
+mixture component's mean to the sample range. The stream starts with a value
+map (a zero byte, or a one byte and a 256-bit set of the sample values whose
+ranks the network codes), then a flags byte. Flags 0 is followed by a v4 row
+stream body. Flags 1 (mixing) or 3 (gated mixing) is followed by a band count
+and the varint lengths and binary arithmetic streams of planes G, R and B,
+band by band; R and B are coded as differences from G. The model
 transmits each fixed-shape tensor as raw binary16 or as Rice-coded integers on a
 power-of-two grid (one per tensor, column, or row) that decode to identical
 binary16 values. Model format 2 codes an all-zero column or row with one
@@ -284,7 +311,9 @@ corruption; it does **not authenticate** files.
 
 The backend uses integer Q24 guide/affine coefficients, Q16 neural operations,
 deterministic integer exponential tables, Q30 probabilities, and 20-bit CDFs.
-No `exp`/libm or floating inference runs in the v2/v3/v4 decoder. Model payloads
+No `exp`/libm or floating inference runs in the v2/v3/v4/v5 decoder; the
+context model uses wrapping 32-bit integer sums, so NEON and scalar builds
+compute identical probabilities. Model payloads
 are limited to 1 MiB (also 1 MiB expanded for v2); arithmetic streams are at most 128 MiB; model
 dimensions, tensor names/shapes, coefficient magnitudes, and positive CDF counts
 are checked. This is not a comprehensive hostile-input security audit or a

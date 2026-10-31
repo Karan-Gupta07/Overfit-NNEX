@@ -3,8 +3,9 @@
 Encodes the given PPM images in order, one complete file each, and decodes
 every file back to its source samples; --files keeps the coded files. Resumes
 from --out. Workers sharing a --claims directory take each image once: a worker
-skips any image another has claimed. Run on committed code; LPCB was not used
-to choose any setting.
+skips any image another has claimed. Run on committed code. LPCB is not held
+out for v5: its NASA images (and five other images, for the mixing screen) were
+used to develop and tune context mixing (MIX_* and SCREEN_* in compress.py).
 """
 
 from __future__ import annotations
@@ -97,6 +98,8 @@ def main() -> None:
                 "selected": report.get("selected"),
                 "strip_reports": report.get("strips"),
                 "phase_seconds": report.get("phase_seconds"),
+                "shared_values": report.get("shared_values"),
+                "mixing": report.get("mixing"),
                 "children_maxrss_mb": peak,
                 "sha256": hashlib.sha256(blob).hexdigest(),
                 "started_at": started_at,

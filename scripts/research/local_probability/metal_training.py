@@ -36,6 +36,18 @@ STRIP = 8
 BLOCK_ROWS = 2
 THREADGROUP_BYTES = 32 * 1024
 MAX_HIDDEN = 64
+# Search estimates (the evaluation kernels' mixture_bits, and coded_bits in
+# neural_probability_probe) spend bits as the integer coder does: its logistic
+# is exactly 0 or 1 beyond +-CODER_SATURATION (Distribution::sigmoid in
+# nnproto_integer.cpp), a component whose range lies beyond adds no mass, and
+# every value keeps one of CODER_TOTAL counts (arithmetic.hpp). EMPTY is the
+# log of no mass. Training's objective clamps the mass instead, which in float
+# rounds to nothing once a mean lies far below the range, and bits come out
+# negative: on the lower half of PIA13757 the searched model was estimated at
+# -3,042,707 bytes, and its file was 61,000 bytes larger than another rounding's.
+CODER_SATURATION = 16
+CODER_TOTAL = 1 << 20
+EMPTY = -1e4
 
 
 def layout(d: int, h: int, k: int) -> dict[str, tuple[int, tuple[int, int]]]:
@@ -324,6 +336,16 @@ inline float sigm(float x) {{
     float e = exp(x);
     return e / (1.0f + e);
 }}
+// log(s(upper) - s(lower)) for upper - lower = width > 0, s the integer coder's
+// logistic; EMPTY where both ends saturate alike.
+inline float log_sigmoid_difference(float upper, float lower, float width) {{
+    const float limit = {CODER_SATURATION}.0f;
+    if (lower >= limit || upper <= -limit) return {EMPTY}f;
+    bool high = upper >= limit, low = lower <= -limit;
+    if (high) return low ? 0.0f : logsigmoid(-lower);
+    if (low) return logsigmoid(upper);
+    return logsigmoid(upper) + logsigmoid(-lower) + log(max(-expm1_acc(-width), 1e-12f));
+}}
 // logsigmoid(x), with s = sigm(-x) from the same exponential.
 inline float logsigmoid_with(float x, thread float& s) {{
     float e = exp(-fabs(x)), u = 1.0f + e;
@@ -452,7 +474,8 @@ kernel void forward_backward(
     e1o[H] = dA;
 }}
 
-// One sample's bits from its head outputs raw and affine prediction A.
+// One sample's bits from its head outputs raw and affine prediction A, as the
+// integer coder spends them (CODER_SATURATION).
 inline float mixture_bits(thread const float* raw, float A, float target, float anchor)
 {{
     float lmax = raw[0];
@@ -466,19 +489,21 @@ inline float mixture_bits(thread const float* raw, float A, float target, float 
         float m = raw[K + i] + A;
         float inv = exp(-clamp(raw[2 * K + i], -4.0f, 7.0f));
         float u = (target + 0.5f - m) * inv, l = (target - 0.5f - m) * inv;
-        float em = max(-expm1_acc(-inv), 1e-12f);
-        float lp = logsigmoid(u) + logsigmoid(-l) + log(em);
         float top = (255.5f - anchor - m) * inv, bot = (-0.5f - anchor - m) * inv;
-        float mass = max(sigm(top) - sigm(bot), 1e-10f);
         float logmix = raw[i] - lse;
-        vmix[i] = logmix + lp;
-        wmix[i] = logmix + log(mass);
+        vmix[i] = logmix + log_sigmoid_difference(u, l, inv);
+        wmix[i] = logmix + log_sigmoid_difference(top, bot, 256.0f * inv);
         vmax = max(vmax, vmix[i]);
         wmax = max(wmax, wmix[i]);
     }}
     float vs = 0.0f, ws = 0.0f;
     for (int i = 0; i < K; i++) {{ vs += exp(vmix[i] - vmax); ws += exp(wmix[i] - wmax); }}
-    return (wmax + log(ws) - vmax - log(vs)) * 1.4426950408889634f;
+    float normal = wmax + log(ws);
+    if (normal < {EMPTY / 2}f) return 8.0f;
+    // -log2 of one count plus (TOTAL - 256) counts times the share exp(-d).
+    float d = normal - vmax - log(vs);
+    float x = d - {math.log(CODER_TOTAL)!r}f, y = {math.log1p(-256 / CODER_TOTAL)!r}f;
+    return (d - max(x, y) - log1p_acc(exp(-fabs(x - y)))) * 1.4426950408889634f;
 }}
 
 // The second layer and head: raw from the first layer's outputs h1. Each

@@ -66,6 +66,45 @@ def mixture_bits(logits, mean, scale, target, anchor):
     return (normal - lp) / math.log(2)
 
 
+def _log_sigmoid_difference(upper, lower, width):
+    """log(s(upper) - s(lower)) for upper - lower = width > 0, s the integer coder's logistic.
+
+    s is exactly 0 or 1 beyond +-CODER_SATURATION; EMPTY where both ends saturate alike.
+    """
+    logsigmoid = torch.nn.functional.logsigmoid
+    limit = metal_training.CODER_SATURATION
+    high, low = upper >= limit, lower <= -limit
+    both = (
+        logsigmoid(upper) + logsigmoid(-lower) + torch.log(-torch.expm1(-width).clamp(max=-1e-12))
+    )
+    value = torch.where(
+        high,
+        torch.where(low, torch.zeros_like(both), logsigmoid(-lower)),
+        torch.where(low, logsigmoid(upper), both),
+    )
+    empty = (lower >= limit) | (upper <= -limit)
+    return torch.where(empty, torch.full_like(value, metal_training.EMPTY), value)
+
+
+def coded_bits(logits, mean, scale, target, anchor):
+    """mixture_bits as the integer coder spends them (metal_training.CODER_SATURATION)."""
+    inv = 1 / scale
+    t, low = target[..., None], anchor[..., None]
+    logmix = torch.log_softmax(logits, dim=-1)
+    lp = torch.logsumexp(
+        logmix + _log_sigmoid_difference((t + 0.5 - mean) * inv, (t - 0.5 - mean) * inv, inv),
+        dim=-1,
+    )
+    edges = (255.5 - low - mean) * inv, (-0.5 - low - mean) * inv
+    normal = torch.logsumexp(logmix + _log_sigmoid_difference(*edges, 256 * inv), dim=-1)
+    # -log2 of one count plus (TOTAL - 256) counts times the share exp(-d).
+    d = normal - lp
+    total = metal_training.CODER_TOTAL
+    keep = torch.full_like(d, math.log1p(-256 / total))
+    bits = (d - torch.logaddexp(d - math.log(total), keep)) / math.log(2)
+    return torch.where(normal < metal_training.EMPTY / 2, torch.full_like(bits, 8.0), bits)
+
+
 def nll(model, x, target, anchor):
     return mixture_bits(*model(x), target, anchor)
 
@@ -843,7 +882,7 @@ def _estimator(x, y, a, dimensions, mixtures, pixels):
     stride = -(-x.shape[1] // SEARCH_SAMPLES)
     if stride > 1:
         x, y, a = (v[:, ::stride].contiguous() for v in (x, y, a))
-    estimator = model_search.Estimator(x, y, a, dimensions, mixtures, mixture_bits)
+    estimator = model_search.Estimator(x, y, a, dimensions, mixtures, coded_bits)
     return estimator, pixels / x.shape[1]
 
 
@@ -935,6 +974,14 @@ def _fit_fused(args, x, y, a, nets, dimensions, planes, prior, count, mark, extr
                 sources[g][f"qat{bits}"] = model_search.round_state(state, bits)
         estimator, scale = _estimator(x, y, a, dimensions, args.mixtures, extras["pixels"])
         extras["search"] = model_search.search(estimator, extras["header"], sources, scale)
+        absorb = getattr(args, "mixing_absorb", None)
+        if absorb is not None:
+            # A context model mixed in absorbs most of what coarser weights cost the network.
+            mixing = model_search.search(estimator, extras["header"], sources, scale * absorb)
+            # Its estimate with every stream bit counted, as for a file of the network alone.
+            fixed = len(mixing["payload"]) + coder.HEADER_SIZE
+            mixing["network_estimated_bytes"] = (mixing["estimated_bytes"] - fixed) / absorb + fixed
+            extras["mixing_search"] = mixing
         print(f"weight search: {time.perf_counter() - mark:.2f} s", flush=True)
     return results, prior
 
@@ -991,6 +1038,13 @@ def run(path, args):
             "uniform_file": str(uniform_path),
             **{k: v for k, v in search.items() if not k.endswith("payload")},
         }
+        mixing = extras.get("mixing_search")
+        if mixing is not None:
+            mixing_path = stem.with_name(stem.name + "-mixing.nnm")
+            mixing_path.write_bytes(mixing["payload"])
+            search["mixing_file"] = str(mixing_path)
+            search["mixing_labels"] = mixing["labels"]
+            search["mixing_estimated_bytes"] = mixing["network_estimated_bytes"]
     model_path = None
     if feature_set == 0:
         metadata = compress(encode_cbor([*header, tensors]))

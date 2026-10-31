@@ -5,6 +5,9 @@ image. Version 2 uses integer inference/CDFs and checks a decoded-pixel hash.
 Version 3 keeps that envelope with a compact exact model payload and optional
 wider causal features. Version 4 keeps the v3 model and probabilities but splits
 the arithmetic stream by row so the decoder can run a multithreaded wavefront.
+Version 5 keeps the v3 model, bounds each mixture component's mean, and either
+codes like v4 or mixes the network with an adaptive context model; it can also
+code ranks among the sample values that every plane uses.
 Model payload version 2 stores an all-zero slice of a sliced tensor as one
 reserved grid shift; version 1 payloads still decode.
 """
@@ -34,7 +37,8 @@ FLOAT_MAGIC = b"NNEX\x00\x01"
 MAGIC = b"NNEX\x00\x02"
 MAGIC_V3 = b"NNEX\x00\x03"
 MAGIC_V4 = b"NNEX\x00\x04"
-INTEGER_MAGICS = (MAGIC, MAGIC_V3, MAGIC_V4)
+MAGIC_V5 = b"NNEX\x00\x05"
+INTEGER_MAGICS = (MAGIC, MAGIC_V3, MAGIC_V4, MAGIC_V5)
 FLOAT_HEADER_SIZE = len(MAGIC) + 8
 HEADER_SIZE = FLOAT_HEADER_SIZE + 32
 MAX_MODEL_BYTES = 1024 * 1024
@@ -43,6 +47,14 @@ MAX_STREAM_BYTES = 128 * 1024 * 1024
 DEFAULT_STREAMS = 16
 # Native backend threads; 0 lets the backend choose.
 THREADS = 0
+# Version 5 layouts, as nnproto_integer.cpp: "sN" codes the network alone in N
+# row streams (v4 with bounded means), "bN" mixes it with a context model in N
+# column bands per plane, and "gN" also lets that model defer to the network
+# where mixing has not been paying.
+V5_KINDS = {"s": (0, 64), "b": (1, 16), "g": (3, 16)}
+# Native calls; context mixing codes several times slower than the network alone.
+TIMEOUT = 300
+V5_TIMEOUT = 1800
 
 
 # Compact canonical v3 model payload. Each tensor is raw binary16 or Rice-coded
@@ -548,6 +560,7 @@ def call(
     integer: bool = False,
     streams=None,
     fits=None,
+    timeout: int = TIMEOUT,
 ) -> None:
     binary = INTEGER_BINARY if integer else BINARY
     command = [str(binary), mode, str(config), str(source), str(target)]
@@ -561,14 +574,22 @@ def call(
         command,
         capture_output=True,
         check=False,
-        timeout=300,
+        timeout=timeout,
     )
     if proc.returncode:
         raise RuntimeError(proc.stderr.decode("utf8", "replace"))
 
 
 def _stream(
-    config: bytes, w: int, h: int, pixels: np.ndarray, *, integer: bool, streams=None, fits=None
+    config: bytes,
+    w: int,
+    h: int,
+    pixels: np.ndarray,
+    *,
+    integer: bool,
+    streams=None,
+    fits=None,
+    mode=None,
 ) -> bytes:
     if pixels.dtype != np.uint8 or pixels.shape != (h, w, 3):
         raise ValueError("expected matching opaque uint8 RGB")
@@ -576,9 +597,11 @@ def _stream(
         directory = Path(td)
         cf, sf, out = (directory / name for name in ("config", "pixels", "coded"))
         cf.write_bytes(config)
-        sf.write_bytes(pixels.tobytes())
-        mode = "encode" if streams is None else "encode-v4"
-        call(mode, cf, sf, out, integer=integer, streams=streams, fits=fits)
+        sf.write_bytes(np.ascontiguousarray(pixels).tobytes())
+        if mode is None:
+            mode = "encode" if streams is None else "encode-v4"
+        timeout = V5_TIMEOUT if mode == "encode-v5" else TIMEOUT
+        call(mode, cf, sf, out, integer=integer, streams=streams, fits=fits, timeout=timeout)
         stream = out.read_bytes()
     if len(stream) > MAX_STREAM_BYTES:
         raise ValueError("oversized arithmetic stream")
@@ -617,6 +640,97 @@ def encode_v4(
     return MAGIC_V4 + struct.pack("<2I", len(payload), len(stream)) + digest + payload + stream
 
 
+def shared_values(pixels: np.ndarray):
+    """Sorted sample values if every plane uses the same set and it has interior gaps."""
+    used = [np.bincount(pixels[..., c].ravel(), minlength=256) > 0 for c in range(3)]
+    if not (np.array_equal(used[0], used[1]) and np.array_equal(used[0], used[2])):
+        return None
+    values = np.flatnonzero(used[0]).astype(np.uint8)
+    return values if int(values[-1]) - int(values[0]) + 1 > len(values) else None
+
+
+def pack_values(pixels: np.ndarray, values: np.ndarray) -> np.ndarray:
+    """Each sample's rank among values, which must hold every sample."""
+    used = np.zeros(256, bool)
+    used[values] = True
+    if not used[pixels].all():
+        raise ValueError("sample outside the value map")
+    ranks = np.zeros(256, np.uint8)
+    ranks[values] = np.arange(len(values))
+    return ranks[pixels]
+
+
+def _v5_head(values) -> bytes:
+    if values is None:
+        return b"\0"
+    values = np.asarray(values)
+    if (
+        values.dtype != np.uint8
+        or values.ndim != 1
+        or not len(values)
+        or np.any(np.diff(values.astype(int)) <= 0)
+    ):
+        raise ValueError("value map")
+    used = np.zeros(256, bool)
+    used[values] = True
+    return b"\1" + np.packbits(used, bitorder="little").tobytes()
+
+
+def _v5_split(stream: bytes):
+    """(sorted values or None, native body) of a v5 stream."""
+    if stream[:1] == b"\0":
+        return None, stream[1:]
+    if stream[:1] != b"\1" or len(stream) < 33:
+        raise ValueError("value map")
+    values = np.flatnonzero(np.unpackbits(np.frombuffer(stream[1:33], np.uint8), bitorder="little"))
+    if not len(values):
+        raise ValueError("value map")
+    return values.astype(np.uint8), stream[33:]
+
+
+def check_layout(layout) -> None:
+    if (
+        type(layout) is not str
+        or len(layout) < 2
+        or layout[0] not in V5_KINDS
+        or not layout[1:].isdigit()
+        or layout[1] == "0"
+        or not 1 <= int(layout[1:]) <= V5_KINDS[layout[0]][1]
+    ):
+        raise ValueError("v5 layout")
+
+
+def encode_v5(
+    pixels: np.ndarray, payload: bytes, *, layout: str = "g1", values=None, fits=None
+) -> bytes:
+    """The v3 model with bounded component means, coded in a V5_KINDS layout.
+
+    With values (shared_values of these pixels) the backend codes each sample's
+    rank among them (pack_values), so the payload's network and any fits must
+    be for the packed pixels. fits is as for encode_v4.
+    """
+    check_layout(layout)
+    head = _v5_head(values)
+    coded = pixels if values is None else pack_values(pixels, values)
+    config, (w, h) = native_configuration(*parse_v3(payload))
+    native = _stream(config, w, h, coded, integer=True, streams=layout, fits=fits, mode="encode-v5")
+    stream = head + native
+    if len(stream) > MAX_STREAM_BYTES:
+        raise ValueError("oversized arithmetic stream")
+    digest = hashlib.sha256(pixels.tobytes()).digest()
+    return MAGIC_V5 + struct.pack("<2I", len(payload), len(stream)) + digest + payload + stream
+
+
+def v5_layout(blob: bytes) -> str:
+    """The layout of a v5 file."""
+    payload = model_payload(blob)
+    _, native = _v5_split(blob[HEADER_SIZE + len(payload) :])
+    kinds = {flags: kind for kind, (flags, _) in V5_KINDS.items()}
+    if len(native) < 2 or native[0] not in kinds:
+        raise ValueError("v5 layout")
+    return f"{kinds[native[0]]}{native[1]}"
+
+
 def model_payload(blob: bytes) -> bytes:
     if not blob.startswith(INTEGER_MAGICS) or len(blob) < HEADER_SIZE:
         raise ValueError("magic")
@@ -627,6 +741,9 @@ def model_payload(blob: bytes) -> bytes:
 def reencode(blob: bytes, pixels: np.ndarray) -> bytes:
     """Encode pixels again with the in-band model (and stream count) of an integer file."""
     payload = model_payload(blob)
+    if blob.startswith(MAGIC_V5):
+        values, _ = _v5_split(blob[HEADER_SIZE + len(payload) :])
+        return encode_v5(pixels, payload, layout=v5_layout(blob), values=values)
     if blob.startswith(MAGIC_V4):
         position = HEADER_SIZE + len(payload)
         if position >= len(blob):
@@ -636,8 +753,9 @@ def reencode(blob: bytes, pixels: np.ndarray) -> bytes:
 
 
 def decode(blob: bytes) -> np.ndarray:
+    version5 = blob.startswith(MAGIC_V5)
     version4 = blob.startswith(MAGIC_V4)
-    version3 = version4 or blob.startswith(MAGIC_V3)
+    version3 = version5 or version4 or blob.startswith(MAGIC_V3)
     integer = version3 or blob.startswith(MAGIC)
     header_size = HEADER_SIZE if integer else FLOAT_HEADER_SIZE
     if (not integer and not blob.startswith(FLOAT_MAGIC)) or len(blob) < header_size:
@@ -652,6 +770,9 @@ def decode(blob: bytes) -> np.ndarray:
         raise ValueError("length")
     metadata = blob[header_size : header_size + model_size]
     stream = blob[header_size + model_size :]
+    values = None
+    if version5:
+        values, stream = _v5_split(stream)
     if version3:
         config, (w, h) = native_configuration(*parse_v3(metadata))
     else:
@@ -661,10 +782,15 @@ def decode(blob: bytes) -> np.ndarray:
         cf, sf, out = (directory / name for name in ("config", "stream", "out"))
         cf.write_bytes(config)
         sf.write_bytes(stream)
-        call("decode-v4" if version4 else "decode", cf, sf, out, integer=integer)
+        mode = "decode-v5" if version5 else "decode-v4" if version4 else "decode"
+        call(mode, cf, sf, out, integer=integer, timeout=V5_TIMEOUT if version5 else TIMEOUT)
         pixels = np.frombuffer(out.read_bytes(), np.uint8)
         if pixels.size != w * h * 3:
             raise ValueError("decoded dimensions")
+        if values is not None:
+            if pixels.max(initial=0) >= len(values):
+                raise ValueError("decoded rank outside the value map")
+            pixels = values[pixels]
         if (
             integer
             and hashlib.sha256(pixels.tobytes()).digest() != blob[FLOAT_HEADER_SIZE:HEADER_SIZE]

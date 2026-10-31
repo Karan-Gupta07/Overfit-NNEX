@@ -256,14 +256,17 @@ def test_integer_backend_matches_without_optimizations(coder, tmp_path):
     local = v3_model(41, 37, 4, grid=True, scale=0.3)
     optimized = coder.encode(pixels, metadata)
     optimized_local = coder.encode_v4(textured, local, streams=3)
+    optimized_mixed = coder.encode_v5(textured, local, layout="g3")
     optimized_fits = coder.local_fits(textured, 4)
     coder.INTEGER_BINARY = alternate
     unoptimized = coder.encode(pixels, metadata)
     assert optimized == unoptimized
     assert np.array_equal(coder.decode(optimized), pixels)
     assert coder.encode_v4(textured, local, streams=3) == optimized_local
+    assert coder.encode_v5(textured, local, layout="g3") == optimized_mixed
     assert np.array_equal(coder.local_fits(textured, 4), optimized_fits)
     assert np.array_equal(coder.decode(optimized_local), textured)
+    assert np.array_equal(coder.decode(optimized_mixed), textured)
 
 
 @pytest.fixture
@@ -733,3 +736,122 @@ def test_v4_stream_count_is_checked_before_encoding(coder):
     for streams in (0, 65, True):
         with pytest.raises(ValueError, match="stream count"):
             coder.encode_v4(pixels, v3_model(), streams=streams)
+
+
+@pytest.mark.parametrize("shape", [(1, 1), (1, 7), (7, 1), (5, 7), (19, 23), (9, 40)])
+@pytest.mark.parametrize("layout", ["s1", "s3", "b1", "b3", "g2"])
+def test_v5_roundtrip_and_reencoding(coder, monkeypatch, shape, layout):
+    h, w = shape
+    pixels = np.random.default_rng(31).integers(0, 256, (h, w, 3), np.uint8)
+    payload = v3_model(w, h, 1, grid=True, scale=0.3)
+    blob = coder.encode_v5(pixels, payload, layout=layout)
+    assert blob.startswith(coder.MAGIC_V5)
+    # Row streams are capped by the height, bands by their 13-column minimum width.
+    limit = h if layout[0] == "s" else max(1, w // 13)
+    assert coder.v5_layout(blob) == f"{layout[0]}{min(int(layout[1:]), limit)}"
+    for threads in (1, 2, 8):
+        monkeypatch.setattr(coder, "THREADS", threads)
+        assert np.array_equal(coder.decode(blob), pixels)
+        assert coder.reencode(blob, pixels) == blob
+    assert coder.model_payload(blob) == payload
+
+
+@pytest.mark.parametrize("feature_set", [3, 4])
+@pytest.mark.parametrize("layout", ["s3", "b2", "g3"])
+def test_v5_least_squares_wavefront_and_precomputed_fits(
+    coder, monkeypatch, tmp_path, feature_set, layout
+):
+    pixels = local_fit_pixels(37, 41)
+    payload = v3_model(41, 37, feature_set, grid=True, scale=0.3)
+    blob = coder.encode_v5(pixels, payload, layout=layout)
+    fits = tmp_path / "fits"
+    coder.local_fits(pixels, feature_set).tofile(fits)
+    assert coder.encode_v5(pixels, payload, layout=layout, fits=fits) == blob
+    for threads in (1, 2, 8):
+        monkeypatch.setattr(coder, "THREADS", threads)
+        assert np.array_equal(coder.decode(blob), pixels)
+
+
+def test_v5_mixing_codes_structure_the_network_misses(coder):
+    # Every fifth value only, and B a function of G: a weak network leaves both.
+    rng = np.random.default_rng(43)
+    g = 5 * rng.integers(0, 40, (64, 64))
+    pixels = np.stack([5 * rng.integers(0, 40, (64, 64)), g, 195 - g], axis=2).astype(np.uint8)
+    payload = v3_model(64, 64, 1, grid=True, scale=0.3)
+    alone = coder.encode_v5(pixels, payload, layout="s1")
+    for layout in ("b1", "g1"):
+        mixed = coder.encode_v5(pixels, payload, layout=layout)
+        assert len(mixed) < 0.9 * len(alone)
+        assert np.array_equal(coder.decode(mixed), pixels)
+
+
+def test_v5_value_map(coder, monkeypatch):
+    rng = np.random.default_rng(47)
+    pixels = (5 * rng.integers(0, 52, (19, 23, 3))).astype(np.uint8)
+    pixels[0, 0] = (0, 255, 5)
+    pixels[0, 1] = (255, 0, 0)
+    pixels[0, 2] = (5, 5, 255)
+    values = coder.shared_values(pixels)
+    assert np.array_equal(values, np.arange(0, 256, 5))
+    packed = coder.pack_values(pixels, values)
+    assert packed.max() == 51 and np.array_equal(values[packed], pixels)
+    payload = v3_model(23, 19, 1, grid=True, scale=0.3)
+    for layout in ("s3", "g2"):
+        blob = coder.encode_v5(pixels, payload, layout=layout, values=values)
+        stream = blob[coder.HEADER_SIZE + len(payload) :]
+        assert stream[0] == 1
+        for threads in (1, 4):
+            monkeypatch.setattr(coder, "THREADS", threads)
+            assert np.array_equal(coder.decode(blob), pixels)
+        assert coder.reencode(blob, pixels) == blob
+        # A map with fewer values than the ranks coded is rejected.
+        short = bytearray(blob)
+        start = coder.HEADER_SIZE + len(payload) + 1
+        short[start : start + 32] = bytes([1]) + bytes(31)
+        with pytest.raises(ValueError, match="value map"):
+            coder.decode(bytes(short))
+
+
+def test_shared_values_need_one_gapped_set(coder):
+    ramp = np.arange(256, dtype=np.uint8).reshape(16, 16)
+    assert coder.shared_values(np.stack([ramp] * 3, axis=2)) is None
+    sparse = (ramp // 2 * 2).astype(np.uint8)
+    assert coder.shared_values(np.stack([sparse, sparse, ramp], axis=2)) is None
+    assert len(coder.shared_values(np.stack([sparse] * 3, axis=2))) == 128
+    with pytest.raises(ValueError, match="value map"):
+        coder.pack_values(np.stack([ramp] * 3, axis=2), np.arange(0, 256, 2, dtype=np.uint8))
+
+
+@pytest.mark.parametrize("layout", ["", "x1", "s0", "s65", "b17", "g01", "g", 3, None])
+def test_v5_layout_is_checked_before_encoding(coder, layout):
+    with pytest.raises(ValueError, match="v5 layout"):
+        coder.encode_v5(np.zeros((5, 7, 3), np.uint8), v3_model(), layout=layout)
+
+
+@pytest.mark.parametrize("flags", [2, 4, 255])
+def test_v5_flags_are_checked(coder, flags):
+    pixels = golden_pixels("noisy")
+    payload = v3_model(23, 19, 1, grid=True, scale=0.3)
+    blob = bytearray(coder.encode_v5(pixels, payload, layout="g2"))
+    blob[coder.HEADER_SIZE + len(payload) + 1] = flags
+    with pytest.raises(RuntimeError, match="v5 flags"):
+        coder.decode(bytes(blob))
+
+
+def test_v5_band_table_is_checked(coder):
+    pixels = golden_pixels("noisy")
+    payload = v3_model(23, 19, 1, grid=True, scale=0.3)
+    blob = coder.encode_v5(pixels, payload, layout="b2")
+    position = coder.HEADER_SIZE + len(payload) + 2
+    # 23 columns hold one band of the minimum width.
+    assert blob[position] == 1
+    for bands in (0, 2, 17):
+        broken = bytearray(blob)
+        broken[position] = bands
+        with pytest.raises(RuntimeError, match="band count"):
+            coder.decode(bytes(broken))
+    stream = blob[coder.HEADER_SIZE + len(payload) :] + b"\0"
+    head = coder.MAGIC_V5 + struct.pack("<2I", len(payload), len(stream))
+    longer = head + blob[coder.FLOAT_HEADER_SIZE : coder.HEADER_SIZE] + payload + stream
+    with pytest.raises(RuntimeError, match="stream lengths"):
+        coder.decode(longer)

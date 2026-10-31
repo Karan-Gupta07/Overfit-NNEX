@@ -1,8 +1,9 @@
 """Experimental best-file encoder: SCDX floor or a self-contained integer NNEX.
 
 This is a research multiplexer, not a new .scdx asset. Its decoder recognizes
-SCDX and integer NNEX v2/v3/v4. Learned candidates compete on their actual
-complete bytes; the encoder writes v4 by default and v3 on request.
+SCDX and integer NNEX v2/v3/v4/v5. Learned candidates compete on their actual
+complete bytes; the encoder writes v5 (the network, optionally mixed with a
+context model) by default and v4 or v3 on request.
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ import queue
 import struct
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import neural_bitstream as coder
@@ -107,6 +109,37 @@ FLOOR_SCREEN = 0.1
 # floor: on graphics, WebP and the symbol path can beat JPEG XL by far. Every
 # development photograph has over 14,000.
 SCREEN_COLORS = 4096
+# Envelope 5 codes learned models as v5 files of the network alone (bounded
+# means, V5_STREAMS row streams). The best learned model then mixes with the
+# context model (mixing_layouts) if that saves at least MIX_GAIN bytes per
+# pixel, since mixing decodes several times slower. Images over SCREEN_MIX
+# pixels first code a centred band of 1/MIX_CROP of their rows both ways, and
+# mix only if mixing saves MIX_SCREEN bytes per pixel of the band.
+V5_STREAMS = coder.DEFAULT_STREAMS
+MIX_GAIN = 0.002
+# The model that mixes comes from a weight search that counts only MIX_ABSORB
+# of each network stream bit: the context model absorbs most of what coarser
+# weights cost the network. On six PIA images 0.3 saved 0.10% of the mixed
+# files (13785: 0.5 and 0.15 saved less).
+MIX_ABSORB = 0.3
+SCREEN_MIX = 2_000_000
+MIX_CROP = 32
+MIX_SCREEN = 0.001
+# The band's bytes are those of coding it after SCREEN_LEAD rows less those of
+# the lead alone: a band's first rows lack the rows above, which costs the
+# network far more than mixing. Without the lead, mixing saved 2.4% of a band
+# of olympus_xz1_01 but 0.07% of the whole photo; with it, 0.08%. Mixing each
+# file's own network on five LPCB images and two strips, where mixing changed
+# the whole stream by -0.14% to +0.07%, the screen said -0.10% to +0.16%; it
+# said 2.2% and 4.2% where mixing saved 1.6% and 5.8%. The network alone is the
+# best file's: on the lower strip of PIA13757 the mixing model alone was already
+# 2.3% smaller than that, and mixing it saved only 0.1% more.
+SCREEN_LEAD = 32
+# Images up to BOTH_GATES pixels code ungated and gated mixing and keep the
+# smaller; above it the gate costs little and saves much decoding time. Images
+# over MIX_BANDS_FROM pixels mix in two column bands per plane.
+BOTH_GATES = 1_000_000
+MIX_BANDS_FROM = 8_000_000
 
 
 class Race:
@@ -231,16 +264,19 @@ def _decompress_strips(blob: bytes) -> np.ndarray:
         or offset + sum(length for _, length in table) != len(blob)
     ):
         raise ValueError("strip file bounds")
-    strips = []
-    for rows, length in table:
+    parts = []
+    for _, length in table:
         part = blob[offset : offset + length]
         offset += length
         if part.startswith(STRIPS_MAGIC):
             raise ValueError("nested strip file")
-        rgba = decompress(part)
-        if rgba.shape != (rows, width, 4):
-            raise ValueError("strip shape")
-        strips.append(rgba)
+        parts.append(part)
+    # Strips are independent files, and a mixed strip decodes on only a few
+    # threads (one per plane and band), so strips decode side by side.
+    with ThreadPoolExecutor(len(parts)) as pool:
+        strips = list(pool.map(decompress, parts))
+    if any(rgba.shape != (rows, width, 4) for (rows, _), rgba in zip(table, strips, strict=True)):
+        raise ValueError("strip shape")
     return np.concatenate(strips, axis=0)
 
 
@@ -257,7 +293,7 @@ def _compress_strips(path: Path, pixels: np.ndarray, options: dict) -> tuple[byt
             suffix = "bmp" if strip.shape[2] == 3 else "png"
             target = Path(directory) / f"strip-{index}.{suffix}"
             Image.fromarray(strip).save(target)
-            blob, report = compress(target, **options)
+            blob, report = compress(target, **{**options, "check": False})
             parts.append((strip.shape[0], blob))
             reports.append(report)
     best = pack_strips(width, parts)
@@ -276,6 +312,8 @@ def _compress_strips(path: Path, pixels: np.ndarray, options: dict) -> tuple[byt
             "selected": report["selected"],
             "seconds": report["seconds"],
             "phase_seconds": report["phase_seconds"],
+            "shared_values": report["shared_values"],
+            "mixing": report["mixing"],
         }
         for (strip_height, _), report in zip(parts, reports, strict=True)
     ]
@@ -304,9 +342,84 @@ def decompress(blob: bytes) -> np.ndarray:
     if blob.startswith(SCDX_MAGIC):
         return decode_bytes(blob)[0]
     if not blob.startswith(coder.INTEGER_MAGICS):
-        raise ValueError("expected SCDX, strips or integer NNEX v2/v3/v4")
+        raise ValueError("expected SCDX, strips or integer NNEX v2/v3/v4/v5")
     rgb = coder.decode(blob)
     return np.concatenate([rgb, np.full((*rgb.shape[:2], 1), 255, np.uint8)], axis=2)
+
+
+def mixing_layouts(pixels: int) -> tuple[str, ...]:
+    """v5 context-mixing layouts tried for an image of this many pixels."""
+    if pixels <= BOTH_GATES:
+        return ("b1", "g1")
+    return ("g2",) if pixels > MIX_BANDS_FROM else ("g1",)
+
+
+def _stream_bytes(blob: bytes) -> int:
+    return len(blob) - coder.HEADER_SIZE - len(coder.model_payload(blob))
+
+
+def screen_mixing(
+    rgb: np.ndarray, network: bytes, payload: bytes, values, layout: str = "g1"
+) -> dict:
+    """Stream bytes of a centred band of rows: network alone, and payload mixed (layout).
+
+    The band follows up to SCREEN_LEAD rows of lead-in, whose own bytes are
+    subtracted. Its first row is even, keeping the network's parity features.
+    """
+    h = rgb.shape[0]
+    rows = max(1, h // MIX_CROP)
+    lead = min(SCREEN_LEAD, (h - rows) // 2 * 2)
+    top = (h - rows - lead) // 2 // 2 * 2
+
+    def size(count: int, kind: str, model: bytes) -> int:
+        if count == 0:
+            return 0
+        part = np.ascontiguousarray(rgb[top : top + count])
+        header, planes = coder.parse_v3(model)
+        model = coder.encode_model((header[0], count, *header[2:]), planes)
+        return _stream_bytes(coder.encode_v5(part, model, layout=kind, values=values))
+
+    jobs = [
+        (count, kind, model)
+        for kind, model in (("s1", network), (layout, payload))
+        for count in (lead + rows, lead)
+    ]
+    with ThreadPoolExecutor(len(jobs)) as pool:
+        whole, alone, mixed, mixed_alone = pool.map(lambda job: size(*job), jobs)
+    return {
+        "rows": rows,
+        "lead": lead,
+        "pixels": rows * rgb.shape[1],
+        "network": whole - alone,
+        "mixed": mixed - mixed_alone,
+    }
+
+
+def _mix(
+    rgb: np.ndarray, network: bytes, payload: bytes, values, fits, best: int
+) -> tuple[bytes | None, dict]:
+    """The smallest context-mixing file of a model payload, if it saves enough over best.
+
+    network is the payload of the best learned file, which codes the network alone.
+    """
+    pixels = rgb.shape[0] * rgb.shape[1]
+    report: dict = {"layouts": []}
+    if pixels > SCREEN_MIX:
+        # Screened with the image's own (banded) layout: two bands cost about 0.8%.
+        layout = mixing_layouts(pixels)[-1]
+        report["screen"] = screen_mixing(rgb, network, payload, values, layout)
+        screen = report["screen"]
+        if screen["network"] - screen["mixed"] < MIX_SCREEN * screen["pixels"]:
+            return None, report
+    mixed = None
+    for layout in mixing_layouts(pixels):
+        candidate = coder.encode_v5(rgb, payload, layout=layout, values=values, fits=fits)
+        report["layouts"].append({"layout": layout, "complete_file_bytes": len(candidate)})
+        if mixed is None or len(candidate) < len(mixed):
+            mixed = candidate
+    if mixed is None or best - len(mixed) < MIX_GAIN * pixels:
+        return None, report
+    return mixed, report
 
 
 # The uniform-grid finalist is coded only when its estimate is within this
@@ -316,21 +429,42 @@ def decompress(blob: bytes) -> np.ndarray:
 UNIFORM_MARGIN = 0.0005
 
 
+def finalist_encoder(envelope: int, fits=None, values=None):
+    """encode(pixels, model) for learned candidates of an envelope.
+
+    fits names precomputed local fits of the training pixels, reused by v4 and
+    v5 encodes; v5 takes the shared values the training pixels were packed with.
+    """
+    if envelope == 5:
+        layout = f"s{V5_STREAMS}"
+        return functools.partial(coder.encode_v5, layout=layout, values=values, fits=fits)
+    return functools.partial(coder.encode_v4, fits=fits) if envelope == 4 else coder.encode_v3
+
+
+def training_pixels(snapshot: Path, values=None) -> np.ndarray:
+    """The image a snapshot of (possibly packed) training pixels came from."""
+    pixels = read_rgb(snapshot, max_pixels=coder.MAX_PIXELS)
+    return pixels if values is None else np.asarray(values, np.uint8)[pixels]
+
+
 def _code_finalists(
-    snapshot: Path, work: Path, search: dict, envelope: int, fits: str | None = None
+    snapshot: Path, work: Path, search: dict, envelope: int, fits: str | None = None, values=None
 ) -> dict:
     """Actual files for the searched model and, if close, the best uniform-grid model.
 
-    fits names the snapshot's precomputed local fits, reused by v4 encodes. The
-    final whole-file check decodes whichever file wins, so finalists are not
-    decoded here.
+    The model searched for mixing also codes alone. fits and values are as for
+    finalist_encoder. The final whole-file check decodes whichever file wins,
+    so finalists are not decoded here.
     """
-    pixels = read_rgb(snapshot, max_pixels=coder.MAX_PIXELS)
-    encode = functools.partial(coder.encode_v4, fits=fits) if envelope == 4 else coder.encode_v3
+    pixels = training_pixels(snapshot, values)
+    encode = finalist_encoder(envelope, fits, values)
     finalists = [("searched", "selected_file", "estimated_bytes", search["labels"])]
     uniform = search["uniform_label"]
     if search["uniform_estimated_bytes"] <= search["estimated_bytes"] * (1 + UNIFORM_MARGIN):
         finalists.append((uniform, "uniform_file", "uniform_estimated_bytes", [uniform] * 3))
+    if search.get("mixing_file"):
+        labels = search["mixing_labels"]
+        finalists.append(("mixing", "mixing_file", "mixing_estimated_bytes", labels))
     candidates, coded = [], {}
     for label, key, estimate, weights in finalists:
         model = Path(search[key]).read_bytes()
@@ -343,7 +477,7 @@ def _code_finalists(
         candidates.append(
             {
                 "weights": weights,
-                "bits": int(label.rsplit("-q", 1)[1]) if label != "searched" else None,
+                "bits": int(label.rsplit("-q", 1)[1]) if key == "uniform_file" else None,
                 "envelope_version": envelope,
                 "model_bytes": len(model),
                 "complete_file_bytes": len(blob),
@@ -382,16 +516,26 @@ def learn(job: dict) -> dict:
         raise
     train_seconds = time.perf_counter() - mark
     mark = time.perf_counter()
-    if trained.get("search"):
+    values = None if job.get("values") is None else np.asarray(job["values"], np.uint8)
+    search = trained.get("search")
+    if search:
         choices = _code_finalists(
-            snapshot, work, trained["search"], job["envelope"], job["training"].get("local_fits")
+            snapshot,
+            work,
+            search,
+            job["envelope"],
+            job["training"].get("local_fits"),
+            values,
         )
+        if search.get("mixing_file"):
+            choices["mixing_model"] = search["mixing_file"]
     else:
         choices = precision_search(
             snapshot,
             Path(trained["model_v3_file"]),
             work / "precision.json",
             envelope=job["envelope"],
+            values=values,
         )
         for row in choices["candidates"]:
             row["file"] = str(work / f"precision-q{row['bits']}.nnexp")
@@ -485,12 +629,13 @@ def compress(
     hybrid=True,
     partition_depth=0,
     sequential=False,
-    envelope=4,
+    envelope=5,
     parallel=True,
     compile_training=False,
     fused_training=None,
     search=None,
     race=None,
+    check=True,
 ) -> tuple[bytes, dict]:
     """Smallest complete file among the floor and every learned candidate.
 
@@ -503,7 +648,8 @@ def compress(
     per-plane weight search, coding only two finalists. widths=None picks
     default_widths for the image size. Unless race=False, parallel fused
     models race (see Race): a model that keeps training is byte-identical to
-    its unraced run, but a dropped width is never fully trained.
+    its unraced run, but a dropped width is never fully trained. check=False
+    skips decoding the chosen file (strips decode their whole file instead).
     """
     options = {name: value for name, value in locals().items() if name != "path"}
     if widths is not None and not isinstance(widths, tuple):
@@ -520,9 +666,10 @@ def compress(
         or not math.isfinite(lr)
         or lr <= 0
         or device not in ("auto", "cpu", "mps")
-        or envelope not in (3, 4)
+        or envelope not in (3, 4, 5)
         or type(parallel) is not bool
         or type(compile_training) is not bool
+        or type(check) is not bool
         or any(v is not None and type(v) is not bool for v in (fused_training, search, race))
     ):
         raise ValueError("invalid learned model budget")
@@ -544,7 +691,13 @@ def compress(
     candidates = []
     dropped: list[dict] = []
     phases: dict[str, float] = {}
+    learned_best = None
+    mixing = None
     opaque = bool(np.all(rgba[..., 3] == 255))
+    rgb = np.ascontiguousarray(rgba[..., :3])
+    # Learned models train on, and v5 codes, ranks among shared sample values.
+    values = coder.shared_values(rgb) if envelope == 5 and opaque else None
+    learn_rgb = rgb if values is None else coder.pack_values(rgb, values)
     if widths is None:
         widths = default_widths(rgba.shape[0] * rgba.shape[1])
     if fused_training is None:
@@ -582,7 +735,7 @@ def compress(
             if models:
                 # Uncompressed: workers only read it back, and PNG costs 0.3 s at 2400 by 2400.
                 snapshot = directory / "source.bmp"
-                Image.fromarray(rgba[..., :3]).save(snapshot, format="BMP")
+                Image.fromarray(learn_rgb).save(snapshot, format="BMP")
                 budget, passes, batch = training_budget(
                     rgba.shape[0] * rgba.shape[1], epochs, fused_training
                 )
@@ -610,6 +763,7 @@ def compress(
                         "qat_bits": QAT_BITS,
                         "qat_epochs": max(1, passes // 10),
                         "qat_lr": QAT_LR,
+                        "mixing_absorb": MIX_ABSORB if envelope == 5 else None,
                         **small_image_training(batch),
                     }
                     if feature_set in local:
@@ -627,13 +781,14 @@ def compress(
                             "threads": coder.THREADS,
                         }
                         | ({"race": rendezvous} if race else {})
+                        | ({} if values is None else {"values": values.tolist()})
                     )
             pending = [pool.apply_async(_learn_in_worker, (job,)) for job in jobs] if pool else []
             # Least-squares fits are computed once here rather than in every worker,
             # which meanwhile build the features that do not need them.
             mark = time.perf_counter()
             for feature_set, target in local.items():
-                coder.local_fits(np.ascontiguousarray(rgba[..., :3]), feature_set).tofile(target)
+                coder.local_fits(learn_rgb, feature_set).tofile(target)
             if local:
                 phases["local-fit"] = time.perf_counter() - mark
             if fits_ready is not None:
@@ -693,6 +848,9 @@ def compress(
                 candidates.append({**labels, **{k: v for k, v in candidate.items() if k != "file"}})
             chosen = result["choices"]["selected"]
             blob = Path(chosen["file"]).read_bytes()
+            if learned_best is None or len(blob) < len(learned_best[0]):
+                mixing_model = result["choices"].get("mixing_model")
+                learned_best = (blob, labels, mixing_model and Path(mixing_model).read_bytes())
             if best is None or len(blob) < len(best):
                 best = blob
                 selected = {
@@ -702,13 +860,29 @@ def compress(
                 }
                 if "weights" in chosen:
                     selected["weights"] = chosen["weights"]
+        if envelope == 5 and learned_best is not None:
+            mark = time.perf_counter()
+            blob, labels, mixing_model = learned_best
+            fits = local.get(labels["feature_set"])
+            network = coder.model_payload(blob)
+            mixed, mixing = _mix(rgb, network, mixing_model or network, values, fits, len(best))
+            phases["mixing"] = time.perf_counter() - mark
+            for row in mixing["layouts"]:
+                candidates.append({**labels, **row})
+            if mixed is not None:
+                best = mixed
+                selected = {
+                    **labels,
+                    "layout": coder.v5_layout(mixed),
+                    "model_bytes": len(coder.model_payload(mixed)),
+                }
     if best is None:
         raise ValueError("no eligible candidate; enable the conventional floor")
-    mark = time.perf_counter()
-    back = decompress(best)
-    if not np.array_equal(back, rgba):
-        raise AssertionError("selected complete file failed independent RGBA decoding")
-    phases["final-check"] = time.perf_counter() - mark
+    if check:
+        mark = time.perf_counter()
+        if not np.array_equal(decompress(best), rgba):
+            raise AssertionError("selected complete file failed independent RGBA decoding")
+        phases["final-check"] = time.perf_counter() - mark
     return best, {
         "image": path.name,
         "source_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
@@ -716,7 +890,7 @@ def compress(
         "complete_file_bytes": len(best),
         "selected": selected,
         "candidates": candidates,
-        "exact_rgba": True,
+        "exact_rgba": check,
         "learned_skipped": None
         if learned and opaque
         else ("disabled" if not learned else "nonopaque"),
@@ -727,6 +901,8 @@ def compress(
         "compiled_training": compile_training,
         "fused_training": fused_training,
         "weight_search": search,
+        "shared_values": None if values is None else len(values),
+        "mixing": mixing,
         "phase_seconds": {name: round(value, 2) for name, value in phases.items()},
         "warning": (
             "Experimental multi-format tool, not a stable release. "
@@ -755,7 +931,7 @@ def main() -> None:
     parser.add_argument("--without-floor", action="store_true")
     parser.add_argument("--floor-only", action="store_true")
     parser.add_argument("--partition-depth", type=int, choices=[0, 1, 2], default=0)
-    parser.add_argument("--envelope", type=int, choices=[3, 4], default=4)
+    parser.add_argument("--envelope", type=int, choices=[3, 4, 5], default=5)
     parser.add_argument("--serial", action="store_true", help="train models one at a time")
     parser.add_argument("--no-race", action="store_true", help="train every width fully (see Race)")
     parser.add_argument("--threads", type=int, default=0, help="native threads; 0 chooses")

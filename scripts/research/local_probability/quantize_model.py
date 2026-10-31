@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import functools
 import hashlib
 import json
 import math
@@ -72,18 +73,32 @@ def load_v3(model_path: Path) -> bytes:
 
 
 def run(
-    path: Path, model_path: Path, prefix: Path, precisions=V3_PRECISIONS, *, envelope: int = 4
+    path: Path,
+    model_path: Path,
+    prefix: Path,
+    precisions=V3_PRECISIONS,
+    *,
+    envelope: int = 4,
+    values=None,
 ) -> dict:
     """Encode precisions in order, stopping after the first one that grows the file.
 
     Sizes are unimodal in practice; the choice is still the smallest actual file
     among those encoded and independently decoded. Envelopes 3 and 4 share the
-    model payload and probabilities; 4 adds row streams for parallel decoding.
+    model payload and probabilities; 4 adds row streams for parallel decoding
+    and 5 (the network alone in row streams) bounds component means. With
+    values (envelope 5), path holds the image's ranks among them.
     """
-    if envelope not in (3, 4):
-        raise ValueError("supported envelopes: 3, 4")
-    encode = coder.encode_v4 if envelope == 4 else coder.encode_v3
+    if envelope not in (3, 4, 5) or (values is not None and envelope != 5):
+        raise ValueError("supported envelopes: 3, 4, 5 (with values)")
+    if envelope == 5:
+        layout = f"s{coder.DEFAULT_STREAMS}"
+        encode = functools.partial(coder.encode_v5, layout=layout, values=values)
+    else:
+        encode = coder.encode_v4 if envelope == 4 else coder.encode_v3
     pixels = read_rgb(path, max_pixels=coder.MAX_PIXELS)
+    if values is not None:
+        pixels = np.asarray(values, np.uint8)[pixels]
     payload = load_v3(model_path)
     candidates = []
     prefix.parent.mkdir(parents=True, exist_ok=True)

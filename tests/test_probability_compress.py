@@ -261,7 +261,14 @@ def test_whole_file_selection_with_actual_learned_model(experiment, tmp_path, mo
         )
         assert np.array_equal(experiment.decompress(blob)[..., :3], pixels)
         if not conventional:
-            assert report["selected"]["format"] == "nnex-v4"
+            assert report["selected"]["format"] == "nnex-v5"
+            assert [row["layout"] for row in report["mixing"]["layouts"]] == ["b1", "g1"]
+            coder = experiment.coder
+            payload = coder.model_payload(blob)
+            values, _ = coder._v5_split(blob[coder.HEADER_SIZE + len(payload) :])
+            screen = experiment.screen_mixing(pixels, payload, payload, values)
+            assert (screen["rows"], screen["lead"], screen["pixels"]) == (1, 4, 7)
+            assert screen["network"] > 0 and screen["mixed"] > 0
             serial, serial_report = experiment.compress(
                 path,
                 widths=(4,),
@@ -319,6 +326,22 @@ def test_whole_file_selection_with_actual_learned_model(experiment, tmp_path, mo
                 capture_output=True,
                 timeout=30,
             )
+    # Every plane holds the same gapped set of values, so models train on ranks.
+    g = 5 * np.random.default_rng(53).integers(0, 40, (5, 7))
+    sparse = np.stack([g, g[::-1], g[:, ::-1]], axis=2).astype(np.uint8)
+    Image.fromarray(sparse).save(path)
+    blob, report = experiment.compress(
+        path,
+        widths=(4,),
+        feature_sets=(1,),
+        epochs=0,
+        device="cpu",
+        conventional=False,
+        hybrid=False,
+    )
+    assert report["learned_in_parallel"]
+    assert report["shared_values"] == len(np.unique(g))
+    assert np.array_equal(experiment.decompress(blob)[..., :3], sparse)
 
 
 def test_uniform_finalist_is_coded_only_when_close(experiment, tmp_path, monkeypatch):

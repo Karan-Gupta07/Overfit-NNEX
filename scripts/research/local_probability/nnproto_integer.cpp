@@ -1,6 +1,7 @@
 // Integer numerical reference, C++17 with 128-bit integer support. Feature sets 3
 // and 4 add binary64 least-squares steps (see LocalFit).
 #include "arithmetic.hpp"
+#include "context_mixing.hpp"
 
 #include <cfloat>
 
@@ -459,13 +460,23 @@ struct LocalFit{
     const Canvas& c;const FitWindow& win;int ch,y,n,m,rows;int32_t* sums;const int32_t* above;
     std::vector<int32_t> total,zero,scratch;
     std::array<int32_t,FIT_INPUTS> f{};Sample g{},h{},cp{},cq{},lp{},lq{};const Sample none{};
+    // start > 0 resumes a row whose columns before start were predicted by
+    // another LocalFit sharing row_sums: total becomes the window at start - 1.
     LocalFit(const Canvas& canvas,const FitWindow& fit_window,int channel,int row,int32_t* row_sums,
-             const int32_t* above_sums)
+             const int32_t* above_sums,int start=0)
         :c(canvas),win(fit_window),ch(channel),y(row),sums(row_sums),
          above(row>0?above_sums:nullptr){
         n=fit_count(win,ch);m=fit_size(win,ch);
         rows=y-std::max(0,y-win.rows);
         total.assign(m,0);zero.assign(m,0);scratch.assign(m,0);
+        if(start>0){
+            const int x=start-1;
+            for(int k=std::max(0,x-win.cols);k<=std::min(c.w-1,x+win.cols);k++){
+                const int32_t* s=&sums[size_t(k)*m];for(int j=0;j<m;j++)total[j]+=s[j];
+            }
+            for(int k=std::max(0,x-win.cols);k<x;k++)update(total.data(),k,y,0,-1);
+            return;
+        }
         for(int x=0;x<=std::min(c.w-1,win.cols);x++){
             const int32_t* s=column(x);for(int k=0;k<m;k++)total[k]+=s[k];
         }
@@ -1039,12 +1050,23 @@ static void fit_image(Canvas& c,const FitWindows& windows,int threads){
         });
     }
 }
+// NNEX v5 keeps each mixture component's mean within four of its scales of
+// the sample range, so no component's in-range mass underflows.
+static void bound_means(Distribution& d){
+    for(int q=0;q<d.k;q++){
+        const int64_t extra=int64_t(d.scales[q])*4;
+        const int64_t lo=-int64_t(d.anchor)*Q-Q/2-extra,hi=int64_t(255-d.anchor)*Q+Q/2+extra;
+        d.means[q]=std::clamp(d.means[q],lo,hi);
+    }
+    d.low=d.raw(0);d.mass=d.raw(256)-d.low;
+}
 // Every sample of a known image has a computable distribution, so the encoder
 // evaluates them in parallel and only arithmetic coding stays in sample order.
 // Row y belongs to stream y % streams; one stream reproduces the v3 bitstream.
-// fitted says the canvas already holds this image's fits.
+// fitted says the canvas already holds this image's fits; bounded applies
+// bound_means (v5).
 static Bytes encode_image(const Model& m,Canvas& c,int streams,int threads,bool split,
-                          bool fitted){
+                          bool fitted,bool bounded=false){
     for(int ch:{1,0,2})parallel(m.h,threads,[&](int y){
         for(int x=0;x<m.w;x++){
             Features f;base_features(m,c,ch,x,y,f);size_t i=size_t(y)*m.w+x;
@@ -1060,7 +1082,7 @@ static Bytes encode_image(const Model& m,Canvas& c,int streams,int threads,bool 
         parallel(rows,threads,[&](int r){
             const int y=y0+r;
             for(int x=0;x<m.w;x++){
-                Distribution p=infer(m,ch,features(m,c,ch,x,y));
+                Distribution p=infer(m,ch,features(m,c,ch,x,y));if(bounded)bound_means(p);
                 int value=c.pixels[ch][size_t(y)*m.w+x];
                 pairs[size_t(r)*m.w+x]={p.cdf(value),p.cdf(value+1)};
             }
@@ -1087,7 +1109,8 @@ static Bytes encode_image(const Model& m,Canvas& c,int streams,int threads,bool 
 using FitSums=std::array<int32_t*,MAX_FITS>;
 template<class Wait,class Done>
 static void decode_row(const Model& m,Canvas& c,int ch,int y,ArithmeticDecoder& decoder,
-                       Wait&& wait,Done&& done,const FitSums& sums,const FitSums& above){
+                       Wait&& wait,Done&& done,const FitSums& sums,const FitSums& above,
+                       bool bounded){
     std::array<std::optional<LocalFit>,MAX_FITS> fit;
     const bool pair=paired(m.windows);
     for(int x=0;x<m.w;x++){
@@ -1098,7 +1121,7 @@ static void decode_row(const Model& m,Canvas& c,int ch,int y,ArithmeticDecoder& 
                              c.fits[1][ch][i],c.spreads[1][ch][i]);
         else for(int s=0;s<m.fits;s++)fit[s]->predict(x,c.fits[s][ch][i],c.spreads[s][ch][i]);
         Features f=features(m,c,ch,x,y);
-        Distribution p=infer(m,ch,f);
+        Distribution p=infer(m,ch,f);if(bounded)bound_means(p);
         uint32_t low,high;int value=p.locate(decoder.target(),low,high);
         decoder.take(low,high);
         c.pixels[ch][i]=uint8_t(value);c.errors[ch][i]=int16_t(value-f.prediction);
@@ -1120,13 +1143,14 @@ struct FitRing{
 static void decode_single(const Model& m,Canvas& c,const Bytes& source){
     ArithmeticDecoder decoder(source);FitRing ring(m,2);
     for(int ch:{1,0,2})for(int y=0;y<m.h;y++)
-        decode_row(m,c,ch,y,decoder,[](int){},[](int){},ring.slot(y%2),ring.slot((y+1)%2));
+        decode_row(m,c,ch,y,decoder,[](int){},[](int){},ring.slot(y%2),ring.slot((y+1)%2),false);
 }
 // Wavefront: row y needs rows above it decoded through column x+3 (the widest
 // causal tap), or x+FIT_REACH+1 with least-squares fits, and its stream's previous row
 // finished. Rows are claimed in
 // order, so the lowest unfinished row can always proceed.
-static void decode_split(const Model& m,Canvas& c,const Bytes& source,int threads){
+static void decode_split(const Model& m,Canvas& c,const Bytes& source,int threads,
+                         bool bounded=false){
     require(!source.empty(),"truncated arithmetic stream");
     size_t pos=1;const int streams=source[0];
     require(streams>=1&&streams<=MAX_STREAMS&&streams<=m.h,"invalid stream count");
@@ -1163,14 +1187,205 @@ static void decode_split(const Model& m,Canvas& c,const Bytes& source,int thread
             decode_row(m,c,ch,y,*decoders[y%streams],
                 [&](int x){int need=std::min(m.w,x+reach);if(above<need)above=await(y-1,need);},
                 [&](int x){progress[y].store(x+1,std::memory_order_release);},
-                ring.slot(y%slots),ring.slot((y+slots-1)%slots));
+                ring.slot(y%slots),ring.slot((y+slots-1)%slots),bounded);
         },&failed);
     }
+}
+// NNEX v5 codes either the network's distributions alone (as v4, in row
+// streams) or through a context-mixing model (context_mixing.hpp) whose
+// planes are split into column bands, each with its own model and stream.
+// The body starts with a flags byte (V5_MIXING, V5_GATED), then holds a v4
+// row-stream body or a band count and the band streams, planes G, R, B.
+constexpr uint8_t V5_MIXING=1,V5_GATED=2;
+struct V5Layout{uint8_t flags=V5_MIXING|V5_GATED;int count=1;};
+// The network's bit probabilities along a coded sample's bits. R and B are
+// coded as (v - G + 128) & 255, a rotation of the network's distribution.
+struct NetworkBits{
+    const Distribution& d;int r;bool rotated;int lo=0,hi=256,mid=0;uint32_t clo=0,chi=TOTAL,cr=0,cm=0;
+    NetworkBits(const Distribution& dist,int rotation,bool rot):d(dist),r(rotation),rotated(rot){cr=C(r);}
+    uint32_t C(int u)const{return u<=0?0u:u>=256?TOTAL:d.cdf(u);}
+    uint32_t F(int u)const{
+        if(!rotated)return C(u);if(u<=0)return 0;if(u>=256)return TOTAL;
+        return r+u<=256?C(r+u)-cr:TOTAL-cr+C(r+u-256);
+    }
+    int operator()(){
+        mid=(lo+hi)/2;cm=F(mid);
+        return v5::clampst((v5::log2q(chi-cm)-v5::log2q(cm-clo))>>8);
+    }
+    void take(int bit){if(bit){lo=mid;clo=cm;}else{hi=mid;chi=cm;}}
+};
+// Bands are at least V5_BAND_WIDTH columns wide, so a sample needs the row
+// above (through the widest reach) only as far as the next band.
+constexpr int V5_MAX_BANDS=16,V5_BAND_WIDTH=FIT_REACH+1;
+static int v5_band_limit(int w){return std::clamp(w/V5_BAND_WIDTH,1,V5_MAX_BANDS);}
+struct V5Planes{
+    v5::Planes p;std::array<Bytes,3> coded,mode,scale;std::array<std::vector<uint16_t>,3> cost;
+    V5Planes(const Model& m,Canvas& c){
+        const size_t n=size_t(m.w)*m.h;p.w=m.w;p.h=m.h;
+        for(int ch=0;ch<3;ch++){
+            mode[ch].assign(n,0);scale[ch].assign(n,0);cost[ch].assign(n,0);
+            if(ch!=1)coded[ch].assign(n,0);
+            p.P[ch]=c.pixels[ch].data();p.Pc[ch]=ch==1?c.pixels[1].data():coded[ch].data();
+            p.mode[ch]=mode[ch].data();p.scale[ch]=scale[ch].data();p.cost[ch]=cost[ch].data();
+        }
+    }
+};
+// Codes plane ch of row y at columns x0..x1-1 through band model M. With an
+// encoder the canvas already holds every sample; with a decoder it receives them.
+template<class Wait,class Done,class IO>
+static void code_v5_segment(const Model& m,Canvas& c,V5Planes& planes,v5::Model& M,int ch,int y,
+                            int x0,int x1,bool decoding,Wait&& wait,Done&& done,const FitSums& sums,
+                            const FitSums& above,IO&& io){
+    std::array<std::optional<LocalFit>,MAX_FITS> fit;const bool pair=paired(m.windows);
+    const v5::Coder coder(planes.p,ch);
+    uint8_t* coded=ch==1?c.pixels[1].data():planes.coded[ch].data();
+    for(int x=x0;x<x1;x++){
+        wait(x);
+        const size_t i=size_t(y)*m.w+x;
+        if(decoding){
+            for(int s=0;s<m.fits;s++)if(!fit[s])fit[s].emplace(c,*m.windows[s],ch,y,sums[s],above[s],x0);
+            if(pair)predict_pair(*fit[0],*fit[1],x,c.fits[0][ch][i],c.spreads[0][ch][i],
+                                 c.fits[1][ch][i],c.spreads[1][ch][i]);
+            else for(int s=0;s<m.fits;s++)fit[s]->predict(x,c.fits[s][ch][i],c.spreads[s][ch][i]);
+        }
+        const Features f=features(m,c,ch,x,y);
+        Distribution d=infer(m,ch,f);bound_means(d);
+        const int r=ch==1?0:(int(c.pixels[1][i])-128)&255;
+        {
+            int best=0;for(int q=1;q<d.k;q++)if(d.weights[q]>d.weights[best])best=q;
+            const int mv=int(std::clamp(int64_t(d.anchor)+rounded(d.means[best],Q),int64_t(0),int64_t(255)));
+            planes.mode[ch][i]=uint8_t(ch==1?mv:std::clamp(mv-int(c.pixels[1][i])+128,0,255));
+            const uint32_t s=std::max<uint32_t>(d.scales[best],2);const int e=31-__builtin_clz(s);
+            planes.scale[ch][i]=uint8_t(std::clamp(2*e+int((s>>(e-1))&1)-20,0,40));
+        }
+        NetworkBits nn(d,r,ch!=1);
+        const int value=decoding?0:(int(c.pixels[ch][i])-r)&255;
+        const int v=coder.code(M,x,y,nn,[&](int p){return io(p,value);});
+        coded[i]=uint8_t(v);
+        if(decoding){
+            const int sample=(v+r)&255;c.pixels[ch][i]=uint8_t(sample);
+            c.errors[ch][i]=int16_t(sample-f.prediction);
+        }
+        done(x);
+    }
+}
+// Band b of a plane covers columns W*b/bands..W*(b+1)/bands-1. All planes and
+// bands run on one wavefront. Band b of row y needs band b-1 of row y (its
+// left neighbours), the row above through the widest reach of the network,
+// its fits or the context model (which runs into band b+1), and its own
+// model's previous row. R row y reads G through row y + 1 and B row y reads R
+// (and so G) through row y + 1. Job (plane slot s, row y, band b) is claimed
+// at step y + b + (bands + 1) s, bands right to left within a step, so every
+// job waits only on jobs claimed before it and the lowest unfinished job can
+// always proceed.
+constexpr std::array<int,3> V5_ORDER={1,0,2};
+template<class IOFactory>
+static void run_v5(const Model& m,Canvas& c,int bands,bool gated,int threads,bool decoding,
+                   IOFactory&& make_io){
+    V5Planes planes(m,c);const int H=m.h,W=m.w,K=bands,L=bands+1;
+    auto start=[&](int b){return int(int64_t(W)*b/K);};
+    std::unique_ptr<std::atomic<int>[]> progress(new std::atomic<int>[size_t(3)*H]);
+    for(size_t k=0;k<size_t(3)*H;k++)progress[k].store(0,std::memory_order_relaxed);
+    std::atomic<bool> failed{false};
+    auto await=[&](int ch,int row,int need){
+        const std::atomic<int>& p=progress[size_t(ch)*H+row];int seen;
+        while((seen=p.load(std::memory_order_acquire))<need){
+            if(failed.load(std::memory_order_relaxed))throw std::runtime_error("coding aborted");
+            std::this_thread::yield();
+        }
+        return seen;
+    };
+    const int reach=m.fits?FIT_REACH+1:4;
+    // Row y's column sums take ring slot y % slots. Its previous user, row
+    // y - slots, is read as the row above until row y - slots + 1 finishes,
+    // which every job of row y awaits.
+    const int slots=K+2;
+    std::vector<FitRing> rings;for(int ch=0;ch<3;ch++)rings.emplace_back(m,decoding?slots:0);
+    std::array<std::vector<std::unique_ptr<v5::Model>>,3> models;
+    for(auto& plane:models)plane.resize(size_t(K));
+    parallel(3*K,threads,[&](int k){
+        const int ch=k/K,b=k%K;
+        models[size_t(ch)][size_t(b)]=std::make_unique<v5::Model>(
+            ch,v5::table_bits(uint64_t(start(b+1)-start(b))*H),gated);
+    });
+    const int steps=H+K-1+2*L;
+    parallel(steps*3*K,std::min(threads,3*K),[&](int job){
+        const int T=job/(3*K),r=job%(3*K),slot=r/K,b=K-1-r%K;
+        const int ch=V5_ORDER[size_t(slot)],y=T-b-L*slot;
+        if(y<0||y>=H)return;
+        const int x0=start(b),x1=start(b+1);
+        if(slot>0)await(V5_ORDER[size_t(slot-1)],std::min(H-1,y+1),W);
+        if(y>0)await(ch,y-1,x1);
+        if(b>0)await(ch,y,x0);
+        if(decoding&&y>=slots-1)await(ch,y-slots+1,W);
+        int above=y>0?x1:W;FitRing& ring=rings[size_t(ch)];
+        code_v5_segment(m,c,planes,*models[size_t(ch)][size_t(b)],ch,y,x0,x1,decoding,
+            [&](int x){const int need=std::min(W,x+reach);if(above<need)above=await(ch,y-1,need);},
+            [&](int x){progress[size_t(ch)*H+y].store(x+1,std::memory_order_release);},
+            decoding?ring.slot(y%slots):FitSums{},decoding?ring.slot((y+slots-1)%slots):FitSums{},
+            make_io(slot*K+b));
+    },&failed);
+}
+static Bytes encode_v5(const Model& m,Canvas& c,V5Layout layout,int threads,bool fitted){
+    if(!(layout.flags&V5_MIXING)){
+        Bytes out{layout.flags};
+        const Bytes body=encode_image(m,c,std::min(layout.count,m.h),threads,true,fitted,true);
+        out.insert(out.end(),body.begin(),body.end());return out;
+    }
+    const int bands=std::min(layout.count,v5_band_limit(m.w));
+    for(int ch:{1,0,2})parallel(m.h,threads,[&](int y){
+        for(int x=0;x<m.w;x++){
+            Features f;base_features(m,c,ch,x,y,f);const size_t i=size_t(y)*m.w+x;
+            c.errors[ch][i]=int16_t(c.pixels[ch][i]-f.prediction);
+        }
+    });
+    if(m.fits&&!fitted)fit_image(c,m.windows,threads);
+    std::vector<v5::Encoder> coders(size_t(3)*bands);
+    std::vector<int> positions(size_t(3)*bands,0);
+    run_v5(m,c,bands,layout.flags&V5_GATED,threads,false,[&](int s){
+        return [&,s](int p,int value){
+            int& bp=positions[size_t(s)];const int bit=(value>>(7-bp))&1;bp=(bp+1)&7;
+            coders[size_t(s)].put(bit,uint32_t(p));
+            return bit;
+        };
+    });
+    Bytes out{layout.flags,uint8_t(bands)};std::vector<Bytes> parts;
+    for(auto& coder:coders){parts.push_back(coder.finish());put_varint(out,parts.back().size());}
+    for(auto& part:parts)out.insert(out.end(),part.begin(),part.end());
+    return out;
+}
+static void decode_v5(const Model& m,Canvas& c,const Bytes& source,int threads){
+    require(!source.empty(),"truncated arithmetic stream");
+    const uint8_t flags=source[0];
+    require(flags==0||flags==V5_MIXING||flags==(V5_MIXING|V5_GATED),"invalid v5 flags");
+    if(!(flags&V5_MIXING)){
+        decode_split(m,c,Bytes(source.begin()+1,source.end()),threads,true);return;
+    }
+    require(source.size()>=2,"truncated arithmetic stream");
+    size_t pos=2;const int bands=source[1];
+    require(bands>=1&&bands<=v5_band_limit(m.w),"invalid band count");
+    const size_t count=size_t(3)*bands;
+    std::vector<uint64_t> sizes(count);uint64_t total=0;
+    for(auto& size:sizes){size=read_varint(source,pos);total+=size;}
+    require(total==source.size()-pos,"invalid stream lengths");
+    std::vector<v5::Decoder> decoders;
+    for(size_t s=0;s<count;s++){decoders.emplace_back(source.data()+pos,size_t(sizes[s]));pos+=sizes[s];}
+    run_v5(m,c,bands,flags&V5_GATED,threads,true,[&](int s){
+        return [&,s](int p,int){return decoders[size_t(s)].get(uint32_t(p));};
+    });
 }
 static int count_argument(const char* text,int low,int high){
     char* end=nullptr;long value=std::strtol(text,&end,10);
     require(end!=text&&*end==0&&value>=low&&value<=high,"invalid thread or stream count");
     return int(value);
+}
+// sN: the network alone in N row streams; bN: mixing in N bands; gN: gated mixing.
+static V5Layout layout_argument(const char* text){
+    const char kind=text[0];V5Layout layout;
+    require(kind=='s'||kind=='b'||kind=='g',"invalid v5 layout");
+    layout.flags=kind=='s'?0:kind=='b'?V5_MIXING:uint8_t(V5_MIXING|V5_GATED);
+    layout.count=count_argument(text+1,1,kind=='s'?MAX_STREAMS:V5_MAX_BANDS);
+    return layout;
 }
 // Exact least-squares fits for training. For each window of the feature set (3
 // by default): int16 fits, then spreads, planes G, R, B.
@@ -1211,16 +1426,18 @@ int main(int argc,char** argv){
     try{
         if(argc>1&&std::string(argv[1])=="local-fit")return local_fit_main(argc,argv);
         require(argc>=5&&argc<=8,
-                "usage: nnproto-integer encode|decode|encode-v4|decode-v4 "
-                "config input output [threads [streams [fits]]]");
+                "usage: nnproto-integer encode|decode|encode-v4|decode-v4|encode-v5|decode-v5 "
+                "config input output [threads [streams|layout [fits]]]");
         const std::string mode=argv[1];
+        const bool mixing=mode=="encode-v5"||mode=="decode-v5";
         const bool split=mode=="encode-v4"||mode=="decode-v4";
-        const bool encoding=mode=="encode"||mode=="encode-v4";
-        require(encoding||mode=="decode"||split,"invalid mode");
+        const bool encoding=mode=="encode"||mode=="encode-v4"||mode=="encode-v5";
+        require(encoding||mode=="decode"||split||mixing,"invalid mode");
         int threads=argc>5?count_argument(argv[5],0,MAX_STREAMS):0;
         if(!threads)threads=automatic_threads(!encoding);
-        require(argc<7||mode=="encode-v4","only encode-v4 takes a stream count");
-        int streams=argc>6?count_argument(argv[6],1,MAX_STREAMS):DEFAULT_STREAMS;
+        require(argc<7||mode=="encode-v4"||mode=="encode-v5","only encode-v4 and encode-v5 take a stream count");
+        const int streams=argc>6&&!mixing?count_argument(argv[6],1,MAX_STREAMS):DEFAULT_STREAMS;
+        const V5Layout layout=argc>6&&mixing?layout_argument(argv[6]):V5Layout{};
         Model m(load(argv[2],1024*1024));Canvas c(m.w,m.h,m.fits);
         Bytes source=load(argv[3],128*1024*1024);
         Bytes output;
@@ -1229,9 +1446,11 @@ int main(int argc,char** argv){
             for(size_t i=0;i<size_t(m.w)*m.h;i++)
                 for(int ch=0;ch<3;ch++)c.pixels[ch][i]=source[3*i+ch];
             if(argc>7)load_fits(m,c,argv[7]);
-            output=encode_image(m,c,split?std::min(streams,m.h):1,threads,split,argc>7);
+            if(mixing)output=encode_v5(m,c,layout,threads,argc>7);
+            else output=encode_image(m,c,split?std::min(streams,m.h):1,threads,split,argc>7);
         }else{
-            if(split)decode_split(m,c,source,threads);else decode_single(m,c,source);
+            if(mixing)decode_v5(m,c,source,threads);
+            else if(split)decode_split(m,c,source,threads);else decode_single(m,c,source);
             output.resize(size_t(m.w)*m.h*3);
             for(size_t i=0;i<size_t(m.w)*m.h;i++)
                 for(int ch=0;ch<3;ch++)output[3*i+ch]=c.pixels[ch][i];

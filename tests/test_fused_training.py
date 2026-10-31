@@ -114,6 +114,30 @@ def test_round_state_rounds_only_hidden_and_head_weights(modules):
     assert mixed["head.weight"] == search.round_state(state, 6)["head.weight"]
 
 
+def test_coded_bits_follow_the_integer_coder(modules):
+    import math
+
+    import torch
+
+    trainer, _search, _coder = modules
+    sharp = math.exp(-4.0)
+    # Rows: a mean 0.9 below the lowest value (the coder's logistic saturates
+    # there; the training objective's clamped float mass comes out negative),
+    # the same beside a component in range, and two ordinary samples.
+    mean = torch.tensor([[-0.9, -0.9], [-0.9, 0.0], [100.2, 90.0], [254.6, 250.0]])
+    scale = torch.tensor([[sharp, sharp], [sharp, 1.0], [1.0, 3.0], [0.7, 2.0]])
+    target = torch.tensor([0.0, 0.0, 100.0, 255.0])
+    anchor = torch.zeros(4)
+    logits = torch.zeros(4, 2)
+    bits = trainer.coded_bits(logits, mean, scale, target, anchor)
+    clamped = trainer.mixture_bits(logits, mean, scale, target, anchor)
+    assert clamped[0] < 0 and bits[0] == 8.0
+    # Only the component in range carries mass.
+    share = (torch.sigmoid(torch.tensor(0.5)) - 0.5) * 2 / (1 - torch.sigmoid(torch.tensor(-0.5)))
+    assert abs(float(bits[1]) + math.log2(float(share))) < 1e-3
+    np.testing.assert_allclose(bits[2:].numpy(), clamped[2:].numpy(), atol=1e-3)
+
+
 def test_search_is_never_worse_than_the_best_uniform_grid(modules):
     import torch
 
@@ -129,7 +153,7 @@ def test_search_is_never_worse_than_the_best_uniform_grid(modules):
         base = coder.feature_dimensions(channel, True, 1)[1]
         state["guide_coeff"] = np.zeros(base, "<f2").tobytes()
         sources.append({"float": state})
-    estimator = search.Estimator(x, y, a, dimensions, 4, trainer.mixture_bits)
+    estimator = search.Estimator(x, y, a, dimensions, 4, trainer.coded_bits)
     header = (40, 50, hidden, 4, True, 1)
     with torch.no_grad():
         result = search.search(estimator, header, sources, 1.0)
@@ -298,8 +322,12 @@ def test_fused_estimates_match_the_reference_estimator(modules):
         for net in nets
     ]
     requests = [(g, search.round_state(states[g], bits)) for g in (0, 1, 2) for bits in (12, 7)]
-    fused = search.Estimator(x, y, a, dimensions, 4, trainer.mixture_bits)
-    reference = search.Estimator(x, y, a, dimensions, 4, trainer.mixture_bits)
+    # Means far below the range, where the coder's logistic saturates.
+    bias = np.frombuffer(states[0]["head.bias"], "<f2").copy()
+    bias[4:8] = -1000.0
+    requests.append((0, {**states[0], "head.bias": bias.astype("<f2").tobytes()}))
+    fused = search.Estimator(x, y, a, dimensions, 4, trainer.coded_bits)
+    reference = search.Estimator(x, y, a, dimensions, 4, trainer.coded_bits)
     got = fused.many(requests, hidden)
     want = [reference.bits(g, state, hidden) for g, state in requests]
     assert np.allclose(got, want, rtol=1e-5)
@@ -315,7 +343,7 @@ def test_staged_estimates_equal_full_estimates(modules, hidden):
     nets = _nets(trainer, dimensions, hidden)
     x, y, a = (t.to("mps") for t in _data(dimensions, 1500))
     x = x.half()
-    staged = search.Estimator(x, y, a, dimensions, 4, trainer.mixture_bits)
+    staged = search.Estimator(x, y, a, dimensions, 4, trainer.coded_bits)
     for g, net in enumerate(nets):
         state = {k: v.detach().numpy().astype("<f2").tobytes() for k, v in net.state_dict().items()}
         base = search.round_state(state, 12)
@@ -330,11 +358,11 @@ def test_staged_estimates_equal_full_estimates(modules, hidden):
             {"hidden.0.weight": 6},
         ]
         states = [search.round_state(base, change) for change in changes]
-        full = search.Estimator(x, y, a, dimensions, 4, trainer.mixture_bits)
+        full = search.Estimator(x, y, a, dimensions, 4, trainer.coded_bits)
         want = full.many([(g, s) for s in states], hidden)
         assert staged.many_after(g, base, states, hidden) == want
         # One at a time, each from base's cached outputs.
-        single = search.Estimator(x, y, a, dimensions, 4, trainer.mixture_bits)
+        single = search.Estimator(x, y, a, dimensions, 4, trainer.coded_bits)
         assert [single.many_after(g, base, [s], hidden)[0] for s in states] == want
 
 

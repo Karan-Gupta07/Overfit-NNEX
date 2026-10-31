@@ -1,4 +1,4 @@
-"""Verify integer NNEX v2/v3/v4 with a second executable; no source image or trainer."""
+"""Verify integer NNEX v2/v3/v4/v5 with a second executable; no source image or trainer."""
 
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ def main() -> None:
             result["scdx_skipped"].append(path.name)
             continue
         if not blob.startswith(coder.INTEGER_MAGICS):
-            raise ValueError("expected integer NNEX v2/v3/v4")
+            raise ValueError("expected integer NNEX v2/v3/v4/v5")
         pixels = coder.decode(blob)
         try:
             coder.INTEGER_BINARY = args.binary
