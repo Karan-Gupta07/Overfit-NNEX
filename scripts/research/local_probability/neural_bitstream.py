@@ -489,6 +489,43 @@ def parse_v3(payload: bytes) -> tuple[tuple, list[dict[str, bytes]]]:
     return decode_model(payload, MAX_MODEL_BYTES)
 
 
+# What constant_planes zeroes. With the hidden layers and head weights at zero a
+# plane's mixture is its head bias around the affine prediction, and zero
+# tensors cost about a byte each in the payload.
+CONSTANT_ZEROS = (
+    "hidden.0.weight",
+    "hidden.0.bias",
+    "hidden.2.weight",
+    "hidden.2.bias",
+    "head.weight",
+)
+
+
+def constant_planes(payload: bytes, planes, fold: bool = False) -> bytes:
+    """The v3 model payload with the networks of planes (0 G, 1 R, 2 B) cut to a constant.
+
+    The constant is the head bias, or with fold the network's output for an
+    input of zeros (its first layer weights cut), moved into the head bias.
+    """
+    header, tensors = parse_v3(payload)
+    for plane in planes:
+        state = dict(tensors[plane])
+        if fold:
+            shapes = tensor_shapes((1, 0, 2)[plane], *header[2:])
+            value = {
+                name: np.frombuffer(raw, "<f2").astype(np.float32).reshape(shapes[name])
+                for name, raw in state.items()
+            }
+            first = np.maximum(value["hidden.0.bias"], 0)
+            second = np.maximum(value["hidden.2.weight"] @ first + value["hidden.2.bias"], 0)
+            folded = value["head.weight"] @ second + value["head.bias"]
+            state["head.bias"] = folded.astype("<f2").tobytes()
+        tensors[plane] = {
+            name: bytes(len(raw)) if name in CONSTANT_ZEROS else raw for name, raw in state.items()
+        }
+    return encode_model(header, tensors, payload[0])
+
+
 def native_configuration(
     header: tuple, planes: list[dict[str, bytes]], *, integer: bool = True
 ) -> tuple[bytes, tuple[int, int]]:

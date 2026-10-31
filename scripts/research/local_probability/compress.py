@@ -150,6 +150,13 @@ SCREEN_LEAD = 32
 # over MIX_BANDS_FROM pixels mix in two column bands per plane.
 BOTH_GATES = 1_000_000
 MIX_BANDS_FROM = 8_000_000
+# R and B planes that nearly repeat G (order-0 entropy of their difference from
+# G under GRAY_BITS per sample, on every GRAY_STEP-th row and column) also code
+# with their networks cut to a constant (coder.constant_planes), and the
+# smaller file wins. On grey PIA images such networks cost more than they
+# save: 13943 7.9 KB, 13856 4.6 KB, 12813 4.0 KB and 13857 2.5 KB smaller.
+GRAY_BITS = 1.0
+GRAY_STEP = 2
 
 
 class Race:
@@ -465,6 +472,52 @@ def _mix(
     if mixed is None or best - len(mixed) < MIX_GAIN * pixels:
         return None, report
     return mixed, report
+
+
+def gray_planes(rgb: np.ndarray) -> tuple[int, ...]:
+    """Model planes (1 R, 2 B) whose samples nearly repeat G's (see GRAY_BITS)."""
+    sampled = rgb[::GRAY_STEP, ::GRAY_STEP].astype(np.int16)
+    planes = []
+    for plane, channel in ((1, 0), (2, 2)):
+        difference = (sampled[..., channel] - sampled[..., 1]) & 255
+        counts = np.bincount(difference.ravel(), minlength=256)
+        p = counts[counts > 0] / max(1, difference.size)
+        if -float((p * np.log2(p)).sum()) < GRAY_BITS:
+            planes.append(plane)
+    return tuple(planes)
+
+
+def _constant_gray(
+    rgb: np.ndarray, source: bytes, planes, values, fits, best: int
+) -> tuple[bytes | None, dict]:
+    """source coded with the networks of planes cut to a constant, if smaller than best.
+
+    Both constants (coder.constant_planes with and without fold) code in
+    source's layout. A network-only source also mixes the smaller one, and
+    keeps a mixed file only if that saves MIX_GAIN bytes per pixel over the
+    smaller network-only file.
+    """
+    pixels = rgb.shape[0] * rgb.shape[1]
+    layout = coder.v5_layout(source)
+    model = coder.model_payload(source)
+    report: dict = {"planes": list(planes), "layouts": []}
+
+    def code(payload: bytes, kind: str, fold: bool) -> bytes:
+        blob = coder.encode_v5(rgb, payload, layout=kind, values=values, fits=fits)
+        report["layouts"].append({"layout": kind, "fold": fold, "complete_file_bytes": len(blob)})
+        return blob
+
+    payloads = {fold: coder.constant_planes(model, planes, fold) for fold in (False, True)}
+    coded = {fold: code(payload, layout, fold) for fold, payload in payloads.items()}
+    fold = min(coded, key=lambda key: len(coded[key]))
+    smallest = coded[fold] if len(coded[fold]) < best else None
+    if layout.startswith("s"):
+        limit = min(best, len(coded[fold])) - MIX_GAIN * pixels
+        for kind in mixing_layouts(pixels):
+            candidate = code(payloads[fold], kind, fold)
+            if len(candidate) < min(limit, len(smallest) if smallest else best):
+                smallest = candidate
+    return smallest, report
 
 
 # The uniform-grid finalist is coded only when its estimate is within this
@@ -942,6 +995,24 @@ def compress(
                     "layout": coder.v5_layout(best),
                     "model_bytes": len(coder.model_payload(best)),
                 }
+            gray = gray_planes(rgb)
+            if gray:
+                mark = time.perf_counter()
+                source, labels = smallest or learned_best
+                fits = local.get(labels["feature_set"])
+                cut, tried = _constant_gray(rgb, source, gray, values, fits, len(best))
+                mixing["gray"] = tried
+                for row in tried["layouts"]:
+                    candidates.append({**labels, **row, "constant_planes": list(gray)})
+                phases["gray"] = time.perf_counter() - mark
+                if cut is not None:
+                    best = cut
+                    selected = {
+                        **labels,
+                        "layout": coder.v5_layout(best),
+                        "model_bytes": len(coder.model_payload(best)),
+                        "constant_planes": list(gray),
+                    }
     if best is None:
         raise ValueError("no eligible candidate; enable the conventional floor")
     if check:

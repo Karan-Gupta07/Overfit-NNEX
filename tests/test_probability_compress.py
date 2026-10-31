@@ -169,6 +169,54 @@ def test_large_images_race_a_narrow_width_only_when_compressible(experiment):
     assert experiment.default_widths(12_000_000, 10**6) == experiment.COMPRESSIBLE_WIDTHS
 
 
+def test_gray_planes_code_with_constant_networks_when_smaller(experiment, monkeypatch):
+    rng = np.random.default_rng(59)
+    g, noise = rng.integers(0, 256, (2, 16, 16))
+
+    def rgb(r, b):
+        return np.stack([r, g, b], axis=2).astype(np.uint8)
+
+    assert experiment.gray_planes(rgb(g, noise)) == (1,)
+    assert experiment.gray_planes(rgb(noise, (g + 3) % 256)) == (2,)
+    assert experiment.gray_planes(rgb(noise, noise)) == ()
+    coder = experiment.coder
+    sizes, mixed = {}, []
+    monkeypatch.setattr(experiment, "MIX_GAIN", 1.0)
+    monkeypatch.setattr(coder, "model_payload", lambda blob: b"model")
+    monkeypatch.setattr(
+        coder, "constant_planes", lambda payload, planes, fold: b"fold" if fold else b"zero"
+    )
+    monkeypatch.setattr(coder, "v5_layout", lambda blob: blob.decode())
+
+    def encode(pixels, payload, layout, values, fits):
+        size = sizes[layout]
+        if isinstance(size, tuple):
+            return bytes(size[payload == b"fold"])
+        mixed.append(payload)
+        return bytes(size)
+
+    monkeypatch.setattr(coder, "encode_v5", encode)
+
+    def cut(source, best, mixing=None, **coded):
+        sizes.clear()
+        sizes.update(coded)
+        mixed.clear()
+        blob, report = experiment._constant_gray(rgb(g, g), source, (1, 2), None, None, best)
+        layouts = [row["layout"] for row in report["layouts"]]
+        assert layouts == [source.decode(), *coded]
+        assert mixed == [mixing] * (len(coded) - 1)
+        return None if blob is None else len(blob)
+
+    # (bytes without fold, with fold) in the source layout; the smaller one mixes,
+    # and mixing must save MIX_GAIN per pixel (256 bytes here) over the smaller
+    # network-only file.
+    assert cut(b"s16", 1100, b"zero", s16=(1000, 1010), b1=900, g1=760) == 1000
+    assert cut(b"s16", 1100, b"fold", s16=(1200, 1150), b1=900, g1=800) == 800
+    assert cut(b"s16", 1100, b"zero", s16=(1200, 1200), b1=900, g1=845) is None
+    assert cut(b"g1", 1100, g1=(1050, 1040)) == 1040
+    assert cut(b"g1", 1100, g1=(1100, 1100)) is None
+
+
 def test_race_continues_only_the_best_score(experiment):
     import multiprocessing
     import threading

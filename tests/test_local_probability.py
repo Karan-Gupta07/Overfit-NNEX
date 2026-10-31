@@ -785,6 +785,37 @@ def test_v5_mixing_codes_structure_the_network_misses(coder):
         assert np.array_equal(coder.decode(mixed), pixels)
 
 
+def test_constant_planes_keep_only_the_head_bias(coder):
+    rng = np.random.default_rng(59)
+    g = rng.integers(0, 256, (24, 24))
+    pixels = np.stack([g, g, (g + 7) % 256], axis=2).astype(np.uint8)
+    payload = v3_model(24, 24, 1, grid=True, scale=0.3)
+    cut = coder.constant_planes(payload, (1, 2))
+    assert len(cut) < len(payload)
+    header, planes = coder.parse_v3(payload)
+    cut_header, cut_planes = coder.parse_v3(cut)
+    assert cut_header == header and cut_planes[0] == planes[0]
+    for plane in (1, 2):
+        for name, raw in cut_planes[plane].items():
+            assert raw == (bytes(len(raw)) if name in coder.CONSTANT_ZEROS else planes[plane][name])
+    for layout in ("s1", "g1"):
+        blob = coder.encode_v5(pixels, cut, layout=layout)
+        assert np.array_equal(coder.decode(blob), pixels)
+    # fold moves the network's output for zero inputs into the head bias.
+    folded = coder.parse_v3(coder.constant_planes(payload, (2,), fold=True))[1]
+    assert folded[:2] == planes[:2]
+    shapes = coder.tensor_shapes(2, *header[2:])
+
+    def value(name):
+        return np.frombuffer(planes[2][name], "<f2").astype(np.float32).reshape(shapes[name])
+
+    first = np.maximum(value("hidden.0.bias"), 0)
+    second = np.maximum(value("hidden.2.weight") @ first + value("hidden.2.bias"), 0)
+    output = value("head.weight") @ second + value("head.bias")
+    bias = np.frombuffer(folded[2]["head.bias"], "<f2")
+    assert np.allclose(bias, output, rtol=1e-2, atol=1e-2)
+
+
 def test_v5_value_map(coder, monkeypatch):
     rng = np.random.default_rng(47)
     pixels = (5 * rng.integers(0, 52, (19, 23, 3))).astype(np.uint8)
