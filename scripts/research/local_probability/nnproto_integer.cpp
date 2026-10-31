@@ -1238,14 +1238,15 @@ struct NetworkBits{
 constexpr int V5_MAX_BANDS=16,V5_BAND_WIDTH=FIT_REACH+1;
 static int v5_band_limit(int w){return std::clamp(w/V5_BAND_WIDTH,1,V5_MAX_BANDS);}
 struct V5Planes{
-    v5::Planes p;std::array<Bytes,3> coded,mode,scale;std::array<std::vector<uint16_t>,3> cost;
+    v5::Planes p;std::array<Bytes,3> coded,mode,scale,across,down;std::array<std::vector<uint16_t>,3> cost;
     V5Planes(const Model& m,Canvas& c){
         const size_t n=size_t(m.w)*m.h;p.w=m.w;p.h=m.h;
         for(int ch=0;ch<3;ch++){
-            mode[ch].assign(n,0);scale[ch].assign(n,0);cost[ch].assign(n,0);
+            mode[ch].assign(n,0);scale[ch].assign(n,0);cost[ch].assign(n,0);across[ch].assign(n,0);down[ch].assign(n,0);
             if(ch!=1)coded[ch].assign(n,0);
             p.P[ch]=c.pixels[ch].data();p.Pc[ch]=ch==1?c.pixels[1].data():coded[ch].data();
             p.mode[ch]=mode[ch].data();p.scale[ch]=scale[ch].data();p.cost[ch]=cost[ch].data();
+            p.across[ch]=across[ch].data();p.down[ch]=down[ch].data();
         }
     }
 };

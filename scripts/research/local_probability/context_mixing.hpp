@@ -57,6 +57,10 @@ inline const Tables TB;
 static inline int squash(int st){return TB.squash[size_t(std::clamp(st,-4096,4095)+4096)];}
 static inline int64_t log2q(uint32_t n){return TB.log2q(n);}
 static inline int clampst(int64_t s){return int(std::clamp<int64_t>(s,-ST_LIM,ST_LIM));}
+// Stretch of a 16-bit probability from exact logarithms, finer than st16 near 0 and 1.
+static inline int stretch16(int p){
+    p=std::clamp(p,1,65535);return clampst((log2q(uint32_t(p))-log2q(uint32_t(65536-p)))>>8);
+}
 // Stretch of a 16-bit or 22-bit probability of a one, in 1/256 log2 units.
 static inline int st16(uint32_t p){return TB.stretch[p>>4];}
 static inline int st22(uint32_t p){return TB.stretch[p>>10];}
@@ -123,14 +127,15 @@ struct Decoder{
 };
 
 // Weights in 1/65536. Updates skip errors under DEAD_ZONE; the rate of a weight
-// set decays with its use: lr * (1 + 1024 / (256 + uses)), in steps of 16 uses.
-constexpr int DEAD_ZONE=25;
+// set decays with its use: lr * (1 + 2560 / (256 + uses)), in steps of 16 uses.
+// lr is MIXER_RATE for mixers over many inputs and SECOND_RATE for the second layer.
+constexpr int DEAD_ZONE=25,MIXER_RATE=6,SECOND_RATE=8;
 struct RateTable{
     std::array<std::array<int32_t,1024>,2> r{};
     RateTable(){
         for(int k=0;k<2;k++){
-            const int lr=k?16:8;
-            for(int b=0;b<1024;b++)r[size_t(k)][size_t(b)]=lr+int32_t(int64_t(4*lr)*256/(256+16*b));
+            const int lr=k?MIXER_RATE:SECOND_RATE;
+            for(int b=0;b<1024;b++)r[size_t(k)][size_t(b)]=lr+int32_t(int64_t(10*lr)*256/(256+16*b));
         }
     }
 };
@@ -138,7 +143,7 @@ inline const RateTable RT;
 struct Mixer{
     int stride=0;const int32_t* rates=nullptr;std::vector<int32_t> w;std::vector<uint16_t> uses;
     void init(int inputs,int sets,int rate){
-        stride=(inputs+3)&~3;rates=RT.r[rate==16?1:0].data();
+        stride=(inputs+3)&~3;rates=RT.r[rate==MIXER_RATE?1:0].data();
         w.assign(size_t(stride)*sets,0);uses.assign(size_t(sets),0u);
     }
     int32_t* at(int s){return &w[size_t(s)*stride];}
@@ -212,24 +217,26 @@ struct APM{
         e[1]=uint16_t(e[1]+((((g-e[1])*weight)>>8)>>7));
     }
 };
-// Node: bits 0-9 bit history, 10-15 update count, 16-31 probability of a one.
+// Node: bits 0-7 bit history (zeros 0-2, ones 3-5, last two bits 6-7), 8-15
+// update count, 16-31 probability of a one. The count reaches 255, so a node's
+// rate falls to about 1/256: images are close to stationary.
 constexpr uint32_t NODE_INIT=32768u<<16;
-constexpr int COUNT_LIMIT=63;
+constexpr int HISTORIES=256,COUNT_LIMIT=255;
 static inline uint32_t history_step(uint32_t s,int bit){
-    int n0=s&15,n1=(s>>4)&15,l=(s>>8)&3;
-    if(bit){if(n1<15)n1++;if(n0>2)n0=n0/2+1;}else{if(n0<15)n0++;if(n1>2)n1=n1/2+1;}
-    l=((l<<1)|bit)&3;return uint32_t(n0|(n1<<4)|(l<<8));
+    int n0=s&7,n1=(s>>3)&7,l=(s>>6)&3;
+    if(bit){if(n1<7)n1++;if(n0>2)n0=n0/2+1;}else{if(n0<7)n0++;if(n1>2)n1=n1/2+1;}
+    l=((l<<1)|bit)&3;return uint32_t(n0|(n1<<3)|(l<<6));
 }
 struct HistoryTable{
-    std::array<uint16_t,2048> next{};
-    HistoryTable(){for(uint32_t s=0;s<1024;s++)for(int b=0;b<2;b++)next[s*2+uint32_t(b)]=uint16_t(history_step(s,b));}
+    std::array<uint16_t,2*HISTORIES> next{};
+    HistoryTable(){for(uint32_t s=0;s<HISTORIES;s++)for(int b=0;b<2;b++)next[s*2+uint32_t(b)]=uint16_t(history_step(s,b));}
 };
 inline const HistoryTable HT;
 static inline void bump(uint32_t& z,int bit){
-    int64_t p=z>>16;int n=(z>>10)&63;
+    int64_t p=z>>16;int n=(z>>8)&255;
     p+=(((bit?65535:0)-p)*TB.rate[size_t(n)]+32768)>>16;p=std::clamp<int64_t>(p,1,65535);
     if(n<COUNT_LIMIT)n++;
-    z=(uint32_t(p)<<16)|(uint32_t(n)<<10)|HT.next[(z&1023)*2+uint32_t(bit)];
+    z=(uint32_t(p)<<16)|(uint32_t(n)<<8)|HT.next[(z&255)*2+uint32_t(bit)];
 }
 // History map entry: bits 0-9 count, 10-31 probability (22 bits).
 static inline void bump32(uint32_t& z,int bit){
@@ -268,11 +275,16 @@ struct Table{
     }
 };
 
-constexpr int CONTEXTS=18,CHROMA_CONTEXTS=4,MAX_CONTEXTS=CONTEXTS+CHROMA_CONTEXTS;
+// Contexts of G, and of R and B: plane contexts, then SHARED_CONTEXTS of every plane.
+constexpr int SHARED_CONTEXTS=7,CONTEXTS=16+SHARED_CONTEXTS,CHROMA_CONTEXTS=19+SHARED_CONTEXTS;
+constexpr int MAX_CONTEXTS=CHROMA_CONTEXTS;
 constexpr int MAX_INPUTS=2+2*MAX_CONTEXTS+2;
 // Mixer weight-set selectors, see Coder::code.
 constexpr std::array<int,6> SELECTOR_SETS={256,64,256,128,256,256};
 constexpr int MIXERS=int(SELECTOR_SETS.size()),MIXER_PAD=(MIXERS+1+3)&~3;
+// The final mixer's stretched inputs: the second layer's output and the six
+// adaptive probability maps.
+constexpr int BLEND_INPUTS=7;
 // Confidence gate (gated models): a (bit, |stretch| >> 8) bucket codes with the network alone
 // while the mixed model's recent cost there is within GATE_RATIO permille of
 // the network's, except every (GATE_PROBE + 1)th bit, which keeps both costs
@@ -288,32 +300,39 @@ static int table_bits(uint64_t samples){
 // What a plane's model reads. P holds samples, Pc coded samples: G as is, R
 // and B as (v - G + 128) & 255. mode is the network's most likely coded
 // sample, scale its scale bucket and cost the network's cost of each coded
-// sample in 1/16 bits, written by Coder::code.
+// sample in 1/16 bits; across and down count the coded samples, up to 255,
+// in the run of equal ones that ends at each sample from the left and from
+// above. Coder::code writes cost, across and down.
 struct Planes{
     int w=0,h=0;
     std::array<const uint8_t*,3> P{},Pc{},mode{},scale{};
     std::array<uint16_t*,3> cost{};
+    std::array<uint8_t*,3> across{},down{};
 };
+// Run lengths in eleven buckets.
+static inline int run_bucket(int r){return r<4?r:r<6?4:r<8?5:r<12?6:r<16?7:r<24?8:r<32?9:10;}
 
 struct Model{
     int ch,na,nin;bool gated;Table T;std::vector<uint32_t> histories;
-    std::array<Mixer,MIXERS> mx,mid;Mixer fin;APM a1,a2;std::array<APM,4> ax;
+    std::array<Mixer,MIXERS> mx,mid;Mixer fin,blend;APM a1,a2;std::array<APM,4> ax;
     int64_t gate_nn[8][GATE_BUCKETS]{},gate_cm[8][GATE_BUCKETS]{};uint32_t gate_seen[8][GATE_BUCKETS]{},gate_count[8][GATE_BUCKETS]{};
     Model(int plane,int bits,bool gate):ch(plane),gated(gate){
-        na=CONTEXTS+(ch==1?0:CHROMA_CONTEXTS);nin=2+2*na;
-        T.init(bits);histories.resize(size_t(na)*8*1024);
-        for(int a=0;a<na;a++)for(int q=0;q<8;q++)for(int s=0;s<1024;s++){
-            const int n0=s&15,n1=(s>>4)&15;const uint32_t p=uint32_t(((2*n1+1)<<22)/(2*(n0+n1)+2));
-            histories[(size_t(a)*8+q)*1024+size_t(s)]=std::clamp<uint32_t>(p,1,(1u<<22)-1)<<10;
+        na=ch==1?CONTEXTS:CHROMA_CONTEXTS;nin=2+2*na;
+        T.init(bits);histories.resize(size_t(na)*8*HISTORIES);
+        for(int a=0;a<na;a++)for(int q=0;q<8;q++)for(int s=0;s<HISTORIES;s++){
+            const int n0=s&7,n1=(s>>3)&7;const uint32_t p=uint32_t(((2*n1+1)<<22)/(2*(n0+n1)+2));
+            histories[(size_t(a)*8+q)*HISTORIES+size_t(s)]=std::clamp<uint32_t>(p,1,(1u<<22)-1)<<10;
         }
         for(int k=0;k<MIXERS;k++){
             const int sets=SELECTOR_SETS[size_t(k)];
-            mx[size_t(k)].init(nin,sets,16);for(int s=0;s<sets;s++)mx[size_t(k)].at(s)[0]=65536;
-            mid[size_t(k)].init(MIXERS+1,sets,8);
+            mx[size_t(k)].init(nin,sets,MIXER_RATE);for(int s=0;s<sets;s++)mx[size_t(k)].at(s)[0]=65536;
+            mid[size_t(k)].init(MIXERS+1,sets,SECOND_RATE);
             for(int s=0;s<sets;s++)for(int t=0;t<MIXERS;t++)mid[size_t(k)].at(s)[t]=65536/MIXERS;
         }
-        fin.init(MIXERS,8,16);for(int q=0;q<8;q++)for(int t=0;t<MIXERS;t++)fin.at(q)[t]=65536/MIXERS;
-        a1.init(256);a2.init(256*16);for(int t=0;t<3;t++)ax[size_t(t)].init(256*256);ax[3].init(256*64);
+        fin.init(MIXERS,8,MIXER_RATE);for(int q=0;q<8;q++)for(int t=0;t<MIXERS;t++)fin.at(q)[t]=65536/MIXERS;
+        blend.init(BLEND_INPUTS+1,256,MIXER_RATE);
+        for(int q=0;q<256;q++)for(int t=0;t<BLEND_INPUTS;t++)blend.at(q)[t]=65536/BLEND_INPUTS;
+        a1.init(256*256);a2.init(256*16);for(int t=0;t<3;t++)ax[size_t(t)].init(256*256);ax[3].init(256*64);
     }
 };
 
@@ -333,49 +352,63 @@ struct Coder{
     int er(int pl,int x,int y)const{
         if(x<0||y<0||x>=S.w||y>=S.h)return 0;const size_t i=size_t(y)*S.w+x;return int(S.Pc[pl][i])-int(S.mode[pl][i]);
     }
-    int contexts(int x,int y,uint64_t* b)const{
+    // across is the run length of W (see Planes).
+    int contexts(int x,int y,int across,uint64_t* b)const{
         const size_t i=size_t(y)*S.w+x;
         const int Wv=px(ch,x-1,y),Nv=px(ch,x,y-1),NW=px(ch,x-1,y-1),NE=px(ch,x+1,y-1),WW=px(ch,x-2,y),NN=px(ch,x,y-2);
-        const int NEE=px(ch,x+2,y-1),NNN=px(ch,x,y-3);
+        const int NEE=px(ch,x+2,y-1),NNN=px(ch,x,y-3),NNE=px(ch,x+1,y-2);
         const int mo=S.mode[ch][i];
         const int big=(Wv<<16)|(Nv<<8)|NW,big2=(NE<<16)|(WW<<8)|NN;
+        // Shared by all planes, after the plane's own contexts: the run of W, four
+        // linear predictions with the samples coded before this one at (x, y), and
+        // the network's mode with its errors (coded sample - mode) around the sample.
+        {
+            uint64_t* s=b+(ch==1?CONTEXTS:CHROMA_CONTEXTS)-SHARED_CONTEXTS;
+            const uint64_t E=(uint64_t(ch)<<6)|32;
+            const int cr=ch==1?0:ch==0?px(1,x,y)+1:((px(1,x,y)<<8)|px(0,x,y))+1;
+            auto cl=[](int v){return std::clamp(v,0,255);};
+            const int g=Wv+Nv-NW,ga=std::abs(g-Wv),gb=std::abs(g-Nv),gc=std::abs(g-NW);
+            const int paeth=ga<=gb&&ga<=gc?Wv:gb<=gc?Nv:NW;
+            const int eW=er(ch,x-1,y),eN=er(ch,x,y-1),eNW=er(ch,x-1,y-1),eNE=er(ch,x+1,y-1);
+            s[0]=hc(E|21,Wv,run_bucket(across),(Nv==Wv)|((NE==Wv)<<1));
+            s[1]=hc(E|2,paeth>>1,cr);s[2]=hc(E|3,cl(Nv+NE-NNE)>>1,cr);
+            s[3]=hc(E|4,cl(2*Wv-WW)>>1,cr);s[4]=hc(E|5,cl(2*Nv-NN)>>1,cr);
+            s[5]=hc(E|29,mo,qe(eW),qe(eN));s[6]=hc(uint64_t(1041+100*ch),mo,qe(eW+eN+(eNW+eNE)/2));
+        }
         if(ch==1){
             b[0]=hc(0,0);b[1]=hc(1,Wv);b[2]=hc(2,Nv);b[3]=hc(3,NE);b[4]=hc(4,NW);
             b[5]=hc(5,Wv,Nv);b[6]=hc(6,Wv,NW);b[7]=hc(7,Nv,NE);b[8]=hc(9,Wv,Nv,NE);b[9]=hc(10,big,big2);
             b[10]=hc(14,x);b[11]=hc(15,std::clamp(Wv+Nv-NW,0,255));
             b[12]=hc(16,std::clamp(2*Nv-NN,0,255),std::clamp(2*Wv-WW,0,255));b[13]=hc(17,Nv,NN,NNN);
-            b[14]=hc(18,Wv,WW);b[15]=hc(19,NE,NEE);b[16]=hc(20,mo,Wv,Nv);b[17]=hc(21,x,mo>>2);
+            b[14]=hc(18,Wv,WW);b[15]=hc(19,NE,NEE);
             return std::abs(Wv-Nv);
         }
         const uint64_t C=uint64_t(ch)<<6;
-        const int o1=px(1,x,y),Wo1=px(1,x-1,y),No1=px(1,x,y-1),NWo1=px(1,x-1,y-1),NEo1=px(1,x+1,y-1);
+        const int o1=px(1,x,y),Wo1=px(1,x-1,y),No1=px(1,x,y-1);
         const int pW=std::clamp(Wv+o1-Wo1,0,255),pN=std::clamp(Nv+o1-No1,0,255);
-        const int pNW=std::clamp(NW+o1-NWo1,0,255),pNE=std::clamp(NE+o1-NEo1,0,255);
         const int GE=px(1,x+1,y),GS=px(1,x,y+1);
         if(ch==0){
             b[0]=hc(C|0,0);b[1]=hc(C|1,Wv);b[2]=hc(C|2,Nv);b[3]=hc(C|3,o1);b[4]=hc(C|4,o1,Wv);b[5]=hc(C|5,o1,Nv);
             b[6]=hc(C|6,o1,NE);b[7]=hc(C|7,o1,NW);b[8]=hc(C|9,o1,pW);b[9]=hc(C|10,o1,pN);
-            b[10]=hc(C|14,mo,o1);b[11]=hc(C|15,mo,Wv);b[12]=hc(C|16,x);b[13]=hc(C|17,o1,(Wo1<<8)|No1,(Wv<<8)|Nv);
-            b[14]=hc(C|18,o1,GE,GS);b[15]=hc(C|19,o1,std::clamp(Wv+Nv-NW,0,255));b[16]=hc(C|20,x,o1>>2);
-            b[17]=hc(C|21,(pW<<8)|pN,(pNW<<8)|pNE);
+            b[10]=hc(C|14,mo,o1);b[11]=hc(C|15,mo,Wv);b[12]=hc(C|16,x);
+            b[13]=hc(C|18,o1,GE,GS);b[14]=hc(C|20,x,o1>>2);
         }else{
-            const int o2=px(0,x,y),Wo2=px(0,x-1,y),No2=px(0,x,y-1);
-            const int qW=std::clamp(Wv+o2-Wo2,0,255),qN=std::clamp(Nv+o2-No2,0,255);
+            const int o2=px(0,x,y),Wo2=px(0,x-1,y);
+            const int qW=std::clamp(Wv+o2-Wo2,0,255);
             const int RE=px(0,x+1,y),RS=px(0,x,y+1);
             b[0]=hc(C|0,0);b[1]=hc(C|1,Wv);b[2]=hc(C|2,Nv);b[3]=hc(C|3,o1);b[4]=hc(C|4,o2);b[5]=hc(C|5,o1,o2);
             b[6]=hc(C|6,o1,o2,Wv);b[7]=hc(C|7,o1,o2,Nv);b[8]=hc(C|9,o2,qW);b[9]=hc(C|10,o1,pW);
             b[10]=hc(C|14,mo,o1,o2);b[11]=hc(C|15,mo,Wv);
-            b[12]=hc(C|16,x);b[13]=hc(C|17,(o1<<8)|o2,Wv,Nv);b[14]=hc(C|18,o2,RE,RS);
-            b[15]=hc(C|19,big,big2);b[16]=hc(C|20,x,o2>>2);b[17]=hc(C|21,(qW<<8)|qN,(pW<<8)|pN);
+            b[12]=hc(C|16,x);b[13]=hc(C|18,o2,RE,RS);b[14]=hc(C|20,x,o2>>2);
         }
         // Raw (uncoded) own samples around the sample, with G.
         const uint8_t* own=S.P[ch];
         auto rr=[&](int dx,int dy)->int{const int xx=x+dx,yy=y+dy;if(xx<0||yy<0||xx>=S.w)return 0;return own[size_t(yy)*S.w+xx];};
         const int rW=rr(-1,0),rN=rr(0,-1),rNW=rr(-1,-1),rNE=rr(1,-1);const int g=S.P[1][i];
-        b[18]=hc(C|22,rW,rN,g);
-        b[19]=hc(C|23,(rW==0)|((rW==255)<<1)|((rN==0)<<2)|((rN==255)<<3)|((rNW==0)<<4)|((rNW==255)<<5)|
+        b[15]=hc(C|22,rW,rN,g);
+        b[16]=hc(C|23,(rW==0)|((rW==255)<<1)|((rN==0)<<2)|((rN==255)<<3)|((rNW==0)<<4)|((rNW==255)<<5)|
                 ((rNE==0)<<6)|((rNE==255)<<7),g);
-        b[20]=hc(C|24,rW,g,Wv);b[21]=hc(C|25,rN,g,Nv);
+        b[17]=hc(C|24,rW,g,Wv);b[18]=hc(C|25,rN,g,Nv);
         return std::abs(Wv-Nv);
     }
     // The network's cost of the six nearest coded samples, in eight buckets.
@@ -388,7 +421,8 @@ struct Coder{
     template<class NN,class IO>
     int code(Model& M,int x,int y,NN& nn,IO&& io)const{
         const int W=S.w;const size_t i=size_t(y)*W+x;const int na=M.na;
-        uint64_t h[MAX_CONTEXTS];const int grad=contexts(x,y,h);
+        const int across=x>0?std::min<int>(32,S.across[ch][i-1]):0,down=y>0?std::min<int>(32,S.down[ch][i-size_t(W)]):0;
+        uint64_t h[MAX_CONTEXTS];const int grad=contexts(x,y,across,h);
         for(int a=0;a<na;a++)M.T.prefetch(h[a]);
         const int lq=loss(x,y);
         const int mo=S.mode[ch][i],sb=S.scale[ch][i];
@@ -397,8 +431,9 @@ struct Coder{
         const int o1=ch==1?0:px(1,x,y),o2=ch==2?px(0,x,y):0;
         // Weight-set selectors, one per mixer (SELECTOR_SETS sizes).
         std::array<int,MIXERS> fixed{};
-        fixed[1]=int(int64_t(x)*64/W);fixed[4]=((x+y)>>5)&255;
+        fixed[1]=int(int64_t(x)*64/W);fixed[4]=run_bucket(across)*16+run_bucket(down);
         const int chroma=ch==1?-1:((o1>>5)*8+(o2>>5))*4;
+        const int errors=(qe(er(ch,x-1,y))<<4)|qe(er(ch,x,y-1));
         uint32_t* cur[MAX_CONTEXTS];
         for(int a=0;a<na;a++)cur[a]=M.T.claim(h[a]);
         uint64_t nx0[MAX_CONTEXTS],nx1[MAX_CONTEXTS];
@@ -424,19 +459,19 @@ struct Coder{
                 nn.take(bit);c0=(c0<<1)|bit;j=(j<<1)|bit;continue;
             }
             xin[0]=st;xin[1]=256;int ni=2;
-            for(int a=0;a<na;a++){const uint32_t z=cur[a][j];xin[ni++]=(z&0xfc00)?st16(z>>16):0;}
+            for(int a=0;a<na;a++){const uint32_t z=cur[a][j];xin[ni++]=(z&0xff00)?st16(z>>16):0;}
             uint32_t* bix[MAX_CONTEXTS];
             for(int a=0;a<na;a++){
-                uint32_t* e=&M.histories[(size_t(a)*8+size_t(bp))*1024+(cur[a][j]&1023)];bix[a]=e;xin[ni++]=st22(*e>>10);
+                uint32_t* e=&M.histories[(size_t(a)*8+size_t(bp))*HISTORIES+(cur[a][j]&255)];bix[a]=e;xin[ni++]=st22(*e>>10);
             }
             while(ni&3)xin[ni++]=0;
             // Within a nibble the next bit's nodes are j's children: fetch their
             // history entries and the next weight sets while this bit mixes.
             if((bp&3)!=3){
-                const uint32_t* next=&M.histories[size_t(bp+1)*1024];
+                const uint32_t* next=&M.histories[size_t(bp+1)*HISTORIES];
                 for(int a=0;a<na;a++){
-                    const uint32_t* row=next+size_t(a)*8*1024;
-                    __builtin_prefetch(row+(cur[a][2*j]&1023));__builtin_prefetch(row+(cur[a][2*j+1]&1023));
+                    const uint32_t* row=next+size_t(a)*8*HISTORIES;
+                    __builtin_prefetch(row+(cur[a][2*j]&255));__builtin_prefetch(row+(cur[a][2*j+1]&255));
                 }
             }
             if(bp<7){
@@ -457,9 +492,17 @@ struct Coder{
             for(int k=MIXERS;k<MIXER_PAD;k++)gx[k]=0;
             shifted(gx,MIXER_PAD,g15,g13);
             const int fo=M.fin.dot(g15,bp);const int pm=squash(fo);
-            const int sum=pm+M.a1.pp(fo,c0)+2*M.a2.pp(fo,c0*16+std::min(15,grad))+M.ax[0].pp(fo,c0*256+Wv)+
-                          M.ax[1].pp(fo,c0*256+Nv)+M.ax[2].pp(fo,c0*256+mo)+M.ax[3].pp(fo,c0*64+lq*8+conf);
-            const int p=std::clamp((sum+4)/8,1,65535);
+            const std::array<int,6> q={M.a1.pp(fo,c0*256+errors),M.a2.pp(fo,c0*16+std::min(15,grad)),M.ax[0].pp(fo,c0*256+Wv),
+                                       M.ax[1].pp(fo,c0*256+Nv),M.ax[2].pp(fo,c0*256+mo),M.ax[3].pp(fo,c0*64+lq*8+conf)};
+            const int sum=pm+q[0]+2*q[1]+q[2]+q[3]+q[4]+q[5];
+            // The fixed average of the maps, and a mixer of their stretches selected by
+            // the bit, the network's recent loss and its confidence.
+            alignas(16) int32_t bx[8]={fo,0,0,0,0,0,0,256},b15[8],b13[8];
+            for(int t=0;t<6;t++)bx[t+1]=stretch16(q[size_t(t)]);
+            shifted(bx,8,b15,b13);
+            const int bsel=(lq*8+bp)*4+std::min(3,conf>>1);
+            const int bo=M.blend.dot(b15,bsel),pb=squash(bo);
+            const int p=std::clamp((std::clamp((sum+4)/8,1,65535)+pb+1)/2,1,65535);
             const int bit=io(p,bp);
             {const int pn=squash(st);const int64_t cn=int64_t(16)*65536-log2q(uint32_t(bit?pn:65536-pn));nncost+=cn;
              const int64_t cm=int64_t(16)*65536-log2q(uint32_t(bit?p:65536-p));
@@ -470,14 +513,17 @@ struct Coder{
                 M.mid[size_t(k)].update(h13,sidx[size_t(k)],((bit<<16)-squash(gx[k]))>>4);
                 M.mx[size_t(k)].update(x13,sidx[size_t(k)],((bit<<16)-squash(fx[k]))>>4);
             }
-            M.fin.update(g13,bp,((bit<<16)-pm)>>4);
+            M.fin.update(g13,bp,((bit<<16)-pm)>>4);M.blend.update(b13,bsel,((bit<<16)-pb)>>4);
             M.a1.update(bit);M.a2.update(bit);for(auto& a:M.ax)a.update(bit);
             for(int a=0;a<na;a++)bump(cur[a][j],bit);
             for(int a=0;a<na;a++)bump32(*bix[a],bit);
             c0=(c0<<1)|bit;j=(j<<1)|bit;
         }
         S.cost[ch][i]=uint16_t(std::min<int64_t>(nncost>>12,65535));
-        return c0&255;
+        const int v=c0&255;
+        S.across[ch][i]=uint8_t(x>0&&v==S.Pc[ch][i-1]?std::min(255,S.across[ch][i-1]+1):1);
+        S.down[ch][i]=uint8_t(y>0&&v==S.Pc[ch][i-size_t(W)]?std::min(255,S.down[ch][i-size_t(W)]+1):1);
+        return v;
     }
 };
 
