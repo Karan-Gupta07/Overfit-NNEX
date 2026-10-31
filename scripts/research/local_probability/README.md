@@ -114,7 +114,9 @@ encoder gets the fits of the whole image once from `nnproto-integer local-fit`
 and reuses them for every complete file it codes, so the backend must be built
 before training with feature set 3 or 4.
 Hidden widths follow image size: 12 and 32 up to 1,000,000 pixels, 24 and 48
-above. Training runs 800 epochs, capped at 51,200 × 8192
+up to 4,000,000, and 48 above, unless the order-0 entropy of MED residuals on
+every fourth row puts the image under 4,000,000 bytes (24 and 48 again: weights
+are a large share of such files once mixed). Training runs 800 epochs, capped at 51,200 × 8192
 samples (73 epochs at 2400×2400), with Adam at 0.015, 5% warmup and cosine
 decay to a 1% floor, seed 20261023, four CPU threads, and MPS when available.
 Images up to 1,000,000 pixels use batch 4096, a per-plane clip norm of 30 and

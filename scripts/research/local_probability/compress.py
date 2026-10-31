@@ -56,8 +56,13 @@ _STRIP = struct.Struct("<2I")
 MAX_SOURCE_BYTES = MAX_STRIPS * coder.MAX_PIXELS * 4 + 4096
 # (maximum pixels, hidden widths): weights cost less per pixel on larger images,
 # but not on very compressible ones once mixed: width 48 weights were a quarter
-# of the mixed PIA13779 (5.4 MP), and width 24 made it 12% smaller.
-WIDTH_TIERS = ((1_000_000, (12, 32)), (coder.MAX_PIXELS, (24, 48)))
+# of the mixed PIA13779 (5.4 MP), and width 24 made it 12% smaller. Larger images
+# whose residual_bytes are under COMPRESSIBLE_BYTES race COMPRESSIBLE_WIDTHS;
+# the others skip a second worker's memory and time. Of the 83 LPCB images (or
+# strips) over 4 MP, four had residual_bytes of 0.9 to 3.0 MB, the rest 6.2 MB up.
+WIDTH_TIERS = ((1_000_000, (12, 32)), (4_000_000, (24, 48)), (coder.MAX_PIXELS, (48,)))
+COMPRESSIBLE_WIDTHS = (24, 48)
+COMPRESSIBLE_BYTES = 4_000_000
 # Quantization-aware snapshots, in chain order, and their learning rate. The
 # weight search never picked 8- or 7-bit snapshots on 20 Tecnick images (crops
 # and natives), so they were dropped. With GPTQ rounding the 10-bit snapshot
@@ -208,6 +213,24 @@ def fast_floor(rgba: np.ndarray) -> bytes:
     rect = Rect.from_px(0, 0, w, h)
     doc.root = Group(rect=rect, children=[RasterPatch(rect=rect, asset=asset, tag="floor")])
     return serialize(doc, lossless=True)
+
+
+def residual_bytes(rgb: np.ndarray, step: int = 4) -> float:
+    """Order-0 entropy of MED (LOCO-I) residuals on every step-th row, in bytes of the image."""
+    h, w = rgb.shape[:2]
+    rows = np.arange(1, h, step)
+    here = rgb[rows].astype(np.int16)
+    above = rgb[rows - 1].astype(np.int16)
+    a, b, c, x = here[:, :-1], above[:, 1:], above[:, :-1], here[:, 1:]
+    high, low = np.maximum(a, b), np.minimum(a, b)
+    prediction = np.where(c >= high, low, np.where(c <= low, high, a + b - c))
+    residuals = ((x - prediction) & 255).astype(np.uint8)
+    bits = 0.0
+    for plane in range(residuals.shape[2]):
+        counts = np.bincount(residuals[..., plane].ravel(), minlength=256)
+        p = counts[counts > 0] / max(1, residuals[..., plane].size)
+        bits -= float((p * np.log2(p)).sum())
+    return bits * h * w / 8
 
 
 def floor_screened(estimates: list[float], fast_bytes: int, colors: int) -> bool:
@@ -630,12 +653,15 @@ def small_image_training(batch: int) -> dict:
     return {"max_norm": SMALL_MAX_NORM if small else MAX_NORM, "prune": small}
 
 
-def default_widths(pixels: int) -> tuple[int, ...]:
-    """Hidden widths tried for an image; wider nets pay off once weights are cheap."""
-    for limit, widths in WIDTH_TIERS:
-        if pixels <= limit:
-            return widths
-    return WIDTH_TIERS[-1][1]
+def default_widths(pixels: int, residual: float | None = None) -> tuple[int, ...]:
+    """Hidden widths tried for an image; wider nets pay off once weights are cheap.
+
+    residual is the image's residual_bytes, needed only over WIDTH_TIERS[-2]'s pixels.
+    """
+    widths = next((tier for limit, tier in WIDTH_TIERS if pixels <= limit), WIDTH_TIERS[-1][1])
+    if pixels > WIDTH_TIERS[-2][0] and residual is not None and residual < COMPRESSIBLE_BYTES:
+        return COMPRESSIBLE_WIDTHS
+    return widths
 
 
 def compress(
@@ -669,7 +695,7 @@ def compress(
     fused_training=None uses the fused Metal trainer whenever MPS is available;
     search=None then adds quantization-aware snapshots and an estimated
     per-plane weight search, coding only two finalists. widths=None picks
-    default_widths for the image size. Unless race=False, parallel fused
+    default_widths for the image. Unless race=False, parallel fused
     models race (see Race): a model that keeps training is byte-identical to
     its unraced run, but a dropped width is never fully trained. check=False
     skips decoding the chosen file (strips decode their whole file instead).
@@ -723,7 +749,8 @@ def compress(
     values = coder.shared_values(rgb) if envelope == 5 and opaque else None
     learn_rgb = rgb if values is None else coder.pack_values(rgb, values)
     if widths is None:
-        widths = default_widths(rgba.shape[0] * rgba.shape[1])
+        area = rgba.shape[0] * rgba.shape[1]
+        widths = default_widths(area, residual_bytes(rgb) if area > WIDTH_TIERS[-2][0] else None)
     if fused_training is None:
         fused_training = (
             bool(widths) and device != "cpu" and not compile_training and _mps_available()

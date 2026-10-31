@@ -156,6 +156,19 @@ def test_only_small_images_prune_and_clip_loosely(experiment):
     assert experiment.small_image_training(batch) == {"max_norm": 10.0, "prune": False}
 
 
+def test_large_images_race_a_narrow_width_only_when_compressible(experiment):
+    flat = np.zeros((64, 64, 3), np.uint8)
+    noise = np.random.default_rng(5).integers(0, 256, (64, 64, 3), np.uint8)
+    assert experiment.residual_bytes(flat) == 0.0
+    assert experiment.residual_bytes(noise) > 0.95 * noise.size
+    assert experiment.default_widths(500_000) == (12, 32)
+    assert experiment.default_widths(3_000_000) == (24, 48)
+    assert experiment.default_widths(3_000_000, 10**9) == (24, 48)
+    assert experiment.default_widths(12_000_000) == (48,)
+    assert experiment.default_widths(12_000_000, experiment.COMPRESSIBLE_BYTES) == (48,)
+    assert experiment.default_widths(12_000_000, 10**6) == experiment.COMPRESSIBLE_WIDTHS
+
+
 def test_race_continues_only_the_best_score(experiment):
     import multiprocessing
     import threading
