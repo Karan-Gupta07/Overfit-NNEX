@@ -38,19 +38,29 @@ The learned photo coder is a research path
    planes decoded before it, recent prediction errors, and both fits with
    their errors, and it outputs a mixture of four logistic distributions over
    the 256 sample values. The three planes train together on the GPU with
-   custom Metal kernels. Images up to 1 Mpx race widths 12 and 32; after a
-   32nd of training only a width whose estimated size (from its recent
-   training loss) is within 3% of the better one continues.
-   Larger images use width 48.
+   custom Metal kernels. Images up to 1 Mpx race widths 12 and 32 and images
+   up to 4 Mpx widths 24 and 48 (larger ones too when a quick entropy
+   estimate says they compress well); others use width 48. After a 32nd of
+   training only a width whose estimated size (from its recent training
+   loss) is within 3% of the best continues, counting the network alone or
+   allowing for the mixing in step 6.
 4. **Shrink.** Short quantization-aware passes give 12- and 10-bit snapshots.
    A search then picks each weight tensor's grid (one grid, or one per column
-   or row) by estimated file size. The stored weights take 3.4 to 9.7 kB per
-   fresh crop and 19 to 22 kB per 2400×2400 file.
+   or row) by estimated file size. The stored weights take 2.2 to 7.5 kB per
+   fresh crop and 8 to 18 kB per 2400×2400 file.
 5. **Code.** A deterministic integer C++ program replays the network for every
    sample and arithmetic-codes the true value with the predicted
    probabilities. The program then decodes the file independently to prove it
    is exact.
-6. **Pick.** Keep the smallest complete file, NNEX or SCDX.
+6. **Mix (NNEX v5).** Code the samples again through a context-mixing model.
+   The network's probability of each bit is one input to gated mixers,
+   beside hashed contexts of neighbouring samples, bit histories, runs of
+   equal samples and the network's recent errors, followed by adaptive
+   probability maps. The context model learns as it codes, so the decoder
+   repeats it, several times slower than the network alone. The mixed file
+   is kept only if it saves at least 0.002 bytes per pixel, and like every
+   file it is decoded to prove it is exact.
+7. **Pick.** Keep the smallest complete file, NNEX or SCDX.
 
 Decoding needs only the file: it reads the weights, repeats the fits, runs the
 same integer network sample by sample, and arithmetic-decodes. No PyTorch, GPU,
@@ -58,9 +68,13 @@ or source image is involved.
 
 ## Photos: LPCB
 
-Summary: [`results/2026-10-28-lpcb-2db19a3.json`](results/2026-10-28-lpcb-2db19a3.json)
+Summaries: NNEX v5 at `ea118a7`,
+[`results/2026-10-31-lpcb-ea118a7.json`](results/2026-10-31-lpcb-ea118a7.json);
+NNEX v4 at `2db19a3`, fresh,
+[`results/2026-10-28-lpcb-2db19a3.json`](results/2026-10-28-lpcb-2db19a3.json)
 (first run at `299bc4c`: [`results/2026-10-27-lpcb-299bc4c.json`](results/2026-10-27-lpcb-299bc4c.json)).
-Notebook: [LPCB](experiments/2026-10-27-lpcb.md). Coded files:
+Notebooks: [LPCB v5](experiments/2026-10-31-lpcb-v5.md),
+[LPCB](experiments/2026-10-27-lpcb.md). Coded v4 files:
 [`lpcb-2db19a3` release](https://github.com/Karan-Gupta07/Overfit-NNEX/releases/tag/lpcb-2db19a3).
 
 The [Lossless Photo Compression Benchmark](https://qlic.altervista.org/LPCB.html)
@@ -69,17 +83,82 @@ camera photos converted from RAW samples (10 to 16 Mpx each) and 45 NASA
 Photojournal images (20 star fields, 25 renders, composites and processed
 views; 0.2 to 46 Mpx). `fetch_lpcb.py` downloads the benchmark's own PPM
 archive from the Wayback Machine and checks all 107 against its published
-MD5 sums, so the published sizes below are for the same pixels. No setting
-was chosen on LPCB: `lpcb_validation.py` ran commit `2db19a3`, one file per
-image, and every file decoded exactly. The coder is unchanged since the first
-run at `299bc4c`, and 102 of the files are byte-identical to that run's. The
-five images over one network's 16.8 Mpx limit hold two or three strips, each
-with its own model, in one file; together they came out 4.8% larger than
-paq8px.
+MD5 sums, so the published sizes below are for the same pixels. The paq8px
+v216 `-9L`, cmix v16 and GraLIC 1.11 sizes are LPCB's published per-image
+results (the top three entries).
 
-The paq8px v216 `-9L`, cmix v16 and GraLIC 1.11 sizes are LPCB's published
-per-image results (the top three entries). Negative means our file is
-smaller:
+### NNEX v5 at `ea118a7` (tuned on LPCB)
+
+v5 codes the network's predictions again through a context-mixing model
+(step 6 above). Its contexts, mixer rates and mixing rules were chosen while
+measuring LPCB images, mostly the NASA ones, so **these results are not
+fresh**; the fresh LPCB result is v4's, below. `lpcb_validation.py` ran
+`ea118a7` with a clean tracked tree, one file per image and one image at a
+time, and every file decoded exactly; `verify_lpcb.py` then found all 107
+saved files matching LPCB's MD5 sums, and an x86_64 build under Rosetta
+decoded 16 of them (mixed and not) to the same pixels and re-encoded each to
+identical bytes. Negative means our file is smaller:
+
+| set | images | ours | vs paq8px | vs cmix | vs GraLIC | smaller than paq8px | `2db19a3` vs paq8px |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Olympus XZ1 | 27 | 246,171,726 | −4.67% | −6.67% | −10.78% | 27/27 | −4.67% |
+| Sony A55 | 12 | 163,062,574 | −3.85% | −5.96% | −11.62% | 12/12 | −3.45% |
+| Fujifilm X100 | 12 | 96,315,297 | −3.85% | −6.32% | −10.44% | 12/12 | −3.72% |
+| Canon 1100D | 11 | 99,650,848 | −2.97% | −5.87% | −11.53% | 11/11 | −2.97% |
+| NASA, other | 25 | 62,022,368 | −0.21% | −1.57% | −18.34% | 8/25 | +22.68% |
+| NASA, stars | 20 | 187,350,168 | −3.90% | −5.36% | −13.04% | 20/20 | −0.08% |
+| **camera photos** | **62** | **605,200,445** | **−4.04%** | −6.29% | −11.08% | **62/62** | −3.91% |
+| **all** | **107** | **854,572,981** | **−3.75%** | −5.76% | −12.08% | **90/107** | −1.21% |
+
+Per camera photo, ours is 1.75% to 5.36% smaller than paq8px, and its stored
+weights take 15.9 to 23.0 kB (0.07% to 0.29% of the file). Mixing was kept on
+four photos, which came out 0.42% to 2.48% smaller than at `2db19a3`; the
+other 58 kept the network alone. paq8px is still smaller on 17 of the 25
+other NASA images, by 0.07% to 17.8% (PIA13779). On those 17 the gap is
+217,472 bytes, of which our stored weights are 139,090. No coded part kept
+the SCDX floor. The five strip files came out 2.92% smaller than paq8px
+(4.8% larger at `2db19a3`).
+
+Against the standard formats (the same baseline sizes as for `2db19a3`):
+
+| codec | 62 camera photos | our saving | all 107 | our saving |
+|---|---:|---:|---:|---:|
+| PNG | 969,833,223 | 37.60% | 1,453,911,150 | 41.22% |
+| WebP lossless | 807,732,126 | 25.07% | 1,198,793,394 | 28.71% |
+| JPEG XL effort 9 | 743,950,384 | 18.65% | 1,071,591,474 | 20.25% |
+| JPEG XL effort 10 | 723,529,248 | 16.35% | 1,034,707,323 | 17.41% |
+| paq8px -9L (published) | 630,710,768 | 4.04% | 887,823,381 | 3.75% |
+| **ours** | **605,200,445** | | **854,572,981** | |
+
+Ours beat JPEG XL effort 10 on every photo, by 12.52% to 20.70% (median
+15.81%), at 2.148 bits per sample against 2.568, and beat the per-image best
+baseline on all 107 images, 17.39% in total.
+
+The run coded one image at a time on AC power, with a browser and chat apps
+open. Encode times include checking the file:
+
+| camera | photos | encode, median (range) | decode, median (range) |
+|---|---:|---:|---:|
+| Olympus XZ1 | 27 | 52.0 s (47.0 to 85.6) | 5.29 s (4.94 to 13.46) |
+| Sony A55 | 12 | 63.6 s (56.5 to 105.9) | 8.92 s (7.98 to 28.42) |
+| Fujifilm X100 | 12 | 52.7 s (49.9 to 75.1) | 6.34 s (6.17 to 16.88) |
+| Canon 1100D | 11 | 49.2 s (47.7 to 51.6) | 6.25 s (6.03 to 7.29) |
+| **all 62** | | **52.5 s** | **6.20 s** |
+
+The slowest photos are the four that mixed (13.5 to 28.4 s to decode). The
+NASA images took longer than at `2db19a3`: 1,597 s to encode the other 25
+(1,036 s) and 191 s to decode them (53 s); 1,680 s and 274 s for the star
+fields (1,493 s and 216 s). All 107 took 1.89 hours to encode (1.64 at
+`2db19a3`) and 0.25 hours to decode (0.23).
+
+### NNEX v4 at `2db19a3` (fresh)
+
+No setting was chosen on LPCB: `lpcb_validation.py` ran commit `2db19a3`, one
+file per image, and every file decoded exactly. The coder is unchanged since
+the first run at `299bc4c`, and 102 of the files are byte-identical to that
+run's. The five images over one network's 16.8 Mpx limit hold two or three
+strips, each with its own model, in one file; together they came out 4.8%
+larger than paq8px. Negative means our file is smaller:
 
 | set | images | ours | vs paq8px | vs cmix | vs GraLIC | smaller than paq8px |
 |---|---:|---:|---:|---:|---:|---:|
@@ -118,7 +197,7 @@ them by 1.5% to 6.0%; PIA13779 is the worst (+55%). LPCB's own published
 totals for WebP 0.6.1 and PNG (pngout), 1,194,936,668 and 1,432,319,902
 bytes, are within 0.3% and 1.5% of the WebP and PNG totals measured here.
 
-### Speed on LPCB
+#### Speed at `2db19a3`
 
 The `2db19a3` run coded one image at a time on AC power, with a chat app and
 a browser open. Encode times include a full decode that checks the file:
@@ -138,9 +217,10 @@ single-threaded.
 
 ## Photos: fresh Tecnick cohort
 
-Summary: [`results/2026-10-27-tecnick-fresh-da035fe.json`](results/2026-10-27-tecnick-fresh-da035fe.json)
+Summary: [`results/2026-10-31-tecnick-fresh-ea118a7.json`](results/2026-10-31-tecnick-fresh-ea118a7.json)
 (first measurement: [`results/2026-10-26-tecnick-fresh.json`](results/2026-10-26-tecnick-fresh.json);
-first re-measure at `a82b98a`: [`results/2026-10-27-tecnick-fresh.json`](results/2026-10-27-tecnick-fresh.json)).
+re-measures at `a82b98a`: [`results/2026-10-27-tecnick-fresh.json`](results/2026-10-27-tecnick-fresh.json),
+and `da035fe`: [`results/2026-10-27-tecnick-fresh-da035fe.json`](results/2026-10-27-tecnick-fresh-da035fe.json)).
 Notebook: [round 3](experiments/2026-10-26-fresh-tecnick.md).
 
 `fetch_tecnick_fresh.py` built this cohort from the 16 TESTIMAGES photographs
@@ -150,58 +230,61 @@ name order). The four native images are therefore the same scenes as four of
 the crops. `fresh_validation.py` first measured the default encoder at commit
 `6c0131e` with a clean tree. Later commits were tuned on the development
 images only. It was re-measured at `a82b98a` (crop files byte-identical,
-native total 42 bytes smaller), and the tables below re-measure it at
-`da035fe`, also with a clean tree: the crops 0.87% and the native images 0.19%
-smaller than at `a82b98a`. Every file decoded exactly, and an x86_64 build
-under Rosetta decoded all 20 to the same pixels and re-encoded each to
-identical bytes.
+native total 42 bytes smaller) and at `da035fe` (the crops 0.87% and the
+native images 0.19% smaller). The tables below re-measure it with NNEX v5 at
+`ea118a7`, also with a clean tree. v5 was developed on LPCB and other NASA
+images and had not run on these; its crops came out 0.33% and its native
+images 0.04% smaller than at `da035fe`. Every file decoded exactly, and an
+x86_64 build under Rosetta decoded all 20 to the same pixels and re-encoded
+each to identical bytes.
 
 ### Totals by codec (bytes)
 
 | codec | 16 crops 512×512 | our saving | 4 native 2400×2400 | our saving |
 |---|---:|---:|---:|---:|
-| PNG | 3,738,879 | 59.26% | 15,427,276 | 58.49% |
-| WebP lossless | 2,733,334 | 44.27% | 11,848,508 | 45.95% |
-| JPEG XL effort 9 | 2,147,237 | 29.06% | 8,905,825 | 28.09% |
-| JPEG XL effort 10 | 2,140,363 | 28.83% | 8,346,560 | 23.27% |
-| paq8px -9L | 1,539,595 | 1.06% | 6,518,112 | 1.75% |
-| **ours** | **1,523,239** | | **6,404,016** | |
+| PNG | 3,738,879 | 59.39% | 15,427,276 | 58.51% |
+| WebP lossless | 2,733,334 | 44.46% | 11,848,508 | 45.97% |
+| JPEG XL effort 9 | 2,147,237 | 29.30% | 8,905,825 | 28.12% |
+| JPEG XL effort 10 | 2,140,363 | 29.07% | 8,346,560 | 23.31% |
+| paq8px -9L | 1,539,595 | 1.39% | 6,518,112 | 1.79% |
+| ours at `da035fe` (v4) | 1,523,239 | 0.33% | 6,404,016 | 0.04% |
+| **ours** | **1,518,194** | | **6,401,366** | |
 
 JPEG XL effort 10 was the best baseline on all 20 files. Against it, the crops
-saved 28.83% in total (median 28.28%, range 21.56% to 37.18%, 16/16 wins) and
-the native images 23.27% (median 23.90%, range 19.45% to 25.46%, 4/4). That is
-0.968 bits per sample against 1.361 on the crops, and 0.741 against 0.966 on
+saved 29.07% in total (median 28.28%, range 23.07% to 37.23%, 16/16 wins) and
+the native images 23.31% (median 23.90%, range 19.58% to 25.46%, 4/4). That is
+0.965 bits per sample against 1.361 on the crops, and 0.741 against 0.966 on
 the native images.
 
 ### Per image: 512×512 crops
 
 | image | ours | best baseline | saving | ours bits/sample | paq8px -9L | ours vs paq8px | weights (width) | encode s | decode s |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| baloons | 79,047 | 108,978 (e10) | 27.47% | 0.804 | 77,733 | +1.69% | 2,970 (12) | 9.7 | 0.17 |
-| billiard_balls_b | 66,880 | 106,456 (e10) | 37.18% | 0.680 | 67,017 | −0.20% | 3,122 (12) | 8.4 | 0.16 |
-| cards_b | 111,773 | 157,633 (e10) | 29.09% | 1.137 | 116,509 | −4.06% | 7,405 (32) | 19.0 | 0.21 |
-| clips | 113,649 | 169,984 (e10) | 33.14% | 1.156 | 116,074 | −2.09% | 7,702 (32) | 18.9 | 0.23 |
-| ducks | 88,375 | 112,668 (e10) | 21.56% | 0.899 | 85,947 | +2.82% | 2,703 (12) | 8.6 | 0.19 |
-| garden_table | 140,447 | 183,433 (e10) | 23.43% | 1.429 | 142,676 | −1.56% | 2,784 (12) | 8.6 | 0.18 |
-| guitar_head | 114,491 | 163,557 (e10) | 30.00% | 1.165 | 116,684 | −1.88% | 2,657 (12) | 8.5 | 0.18 |
-| lion | 87,416 | 132,928 (e10) | 34.24% | 0.889 | 90,820 | −3.75% | 2,501 (12) | 8.6 | 0.18 |
-| pencils_b | 86,616 | 114,992 (e10) | 24.68% | 0.881 | 84,535 | +2.46% | 2,882 (12) | 8.5 | 0.19 |
-| roof | 81,809 | 125,504 (e10) | 34.82% | 0.832 | 85,398 | −4.20% | 2,411 (12) | 8.8 | 0.18 |
-| snails | 83,430 | 120,422 (e10) | 30.72% | 0.849 | 85,055 | −1.91% | 2,647 (12) | 8.6 | 0.18 |
-| tomatoes_a | 93,258 | 122,597 (e10) | 23.93% | 0.949 | 92,100 | +1.26% | 2,564 (12) | 8.7 | 0.20 |
-| tomatoes_b | 79,218 | 103,678 (e10) | 23.59% | 0.806 | 78,591 | +0.80% | 2,552 (12) | 8.6 | 0.18 |
-| tools_a | 112,191 | 153,202 (e10) | 26.77% | 1.141 | 112,743 | −0.49% | 2,645 (12) | 8.6 | 0.19 |
-| tools_b | 103,821 | 142,012 (e10) | 26.89% | 1.056 | 104,968 | −1.09% | 2,955 (12) | 8.5 | 0.19 |
-| wood_game | 80,818 | 122,319 (e10) | 33.93% | 0.822 | 82,745 | −2.33% | 2,536 (12) | 8.8 | 0.19 |
+| baloons | 79,017 | 108,978 (e10) | 27.49% | 0.804 | 77,733 | +1.65% | 2,894 (12) | 21.9 | 0.14 |
+| billiard_balls_b | 66,820 | 106,456 (e10) | 37.23% | 0.680 | 67,017 | −0.29% | 3,125 (12) | 20.5 | 0.14 |
+| cards_b | 111,804 | 157,633 (e10) | 29.07% | 1.137 | 116,509 | −4.04% | 7,504 (32) | 20.8 | 0.15 |
+| clips | 113,516 | 169,984 (e10) | 33.22% | 1.155 | 116,074 | −2.20% | 7,477 (32) | 20.8 | 0.16 |
+| ducks | 86,681 | 112,668 (e10) | 23.07% | 0.882 | 85,947 | +0.85% | 2,799 (12) | 20.4 | 0.13 |
+| garden_table | 140,447 | 183,433 (e10) | 23.43% | 1.429 | 142,676 | −1.56% | 2,784 (12) | 10.3 | 0.13 |
+| guitar_head | 112,847 | 163,557 (e10) | 31.00% | 1.148 | 116,684 | −3.29% | 6,945 (32) | 20.6 | 0.15 |
+| lion | 87,414 | 132,928 (e10) | 34.24% | 0.889 | 90,820 | −3.75% | 2,501 (12) | 20.5 | 0.13 |
+| pencils_b | 85,771 | 114,992 (e10) | 25.41% | 0.873 | 84,535 | +1.46% | 2,490 (12, mixed) | 21.4 | 0.98 |
+| roof | 81,814 | 125,504 (e10) | 34.81% | 0.832 | 85,398 | −4.20% | 2,454 (12) | 21.0 | 0.14 |
+| snails | 83,365 | 120,422 (e10) | 30.77% | 0.848 | 85,055 | −1.99% | 2,653 (12) | 20.7 | 0.15 |
+| tomatoes_a | 93,259 | 122,597 (e10) | 23.93% | 0.949 | 92,100 | +1.26% | 2,564 (12) | 20.4 | 0.13 |
+| tomatoes_b | 79,219 | 103,678 (e10) | 23.59% | 0.806 | 78,591 | +0.80% | 2,552 (12) | 20.6 | 0.13 |
+| tools_a | 112,185 | 153,202 (e10) | 26.77% | 1.141 | 112,743 | −0.49% | 2,645 (12) | 20.8 | 0.15 |
+| tools_b | 103,292 | 142,012 (e10) | 27.27% | 1.051 | 104,968 | −1.60% | 2,664 (12, mixed) | 21.6 | 1.02 |
+| wood_game | 80,743 | 122,319 (e10) | 33.99% | 0.821 | 82,745 | −2.42% | 2,230 (12) | 20.5 | 0.14 |
 
 ### Per image: native 2400×2400
 
 | image | ours | JXL e10 | saving | ours bits/sample | paq8px -9L | ours vs paq8px | weights (width) | encode s | decode s |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| baloons | 1,626,027 | 2,181,287 | 25.46% | 0.753 | 1,656,058 | −1.81% | 17,837 (48) | 39.8 | 4.88 |
-| ducks | 1,559,084 | 1,935,470 | 19.45% | 0.722 | 1,586,294 | −1.72% | 16,003 (48) | 40.7 | 5.74 |
-| pencils_b | 1,631,284 | 2,131,639 | 23.47% | 0.755 | 1,641,432 | −0.62% | 18,427 (48) | 40.2 | 4.64 |
-| tomatoes_b | 1,587,621 | 2,098,164 | 24.33% | 0.735 | 1,634,328 | −2.86% | 17,130 (48) | 39.4 | 4.67 |
+| baloons | 1,626,002 | 2,181,287 | 25.46% | 0.753 | 1,656,058 | −1.81% | 17,825 (48) | 63.0 | 3.08 |
+| ducks | 1,556,473 | 1,935,470 | 19.58% | 0.721 | 1,586,294 | −1.88% | 8,256 (24) | 61.6 | 3.13 |
+| pencils_b | 1,631,273 | 2,131,639 | 23.47% | 0.755 | 1,641,432 | −0.62% | 18,354 (48) | 72.8 | 3.49 |
+| tomatoes_b | 1,587,618 | 2,098,164 | 24.33% | 0.735 | 1,634,328 | −2.86% | 17,130 (48) | 62.4 | 3.35 |
 
 ### Against paq8px
 
@@ -213,21 +296,24 @@ built for arm64, at its strongest practical setting `-9L` (about 4.3 GB of
 memory), on a binary PPM of the exact RGB samples. A size counts only after
 its archive decompressed to exactly the source samples; all 20 did.
 
-In total our files are 1.06% smaller on the crops and 1.75% smaller on the
-native images. Per image, ours range from 4.20% smaller to 2.82% larger on the
+In total our files are 1.39% smaller on the crops and 1.79% smaller on the
+native images. Per image, ours range from 4.20% smaller to 1.65% larger on the
 crops (smaller on 11 of 16) and are 0.62% to 2.86% smaller on all four native
-images. Our stored weights are 2.0% to 6.8% of a crop file but only 1.0% to
+images. Our stored weights are 2.0% to 6.7% of a crop file but only 0.5% to
 1.1% of a native file, which is most of why the native images fare better.
 paq8px wins baloons, ducks, pencils_b, tomatoes_a and tomatoes_b, by 0.80% to
-2.82%. billiard_balls_b, its largest win at `a82b98a` (+5.52%, when that crop
-kept width 32 with 9.7 kB of weights), is now 0.20% smaller than paq8px.
+1.65% (by up to 2.82% at `da035fe`). billiard_balls_b, its largest win at
+`a82b98a` (+5.52%, when that crop kept width 32 with 9.7 kB of weights), is
+now 0.29% smaller than paq8px.
 
 ### Speed
 
 | step | 512×512 crops | 2400×2400 |
 |---|---:|---:|
-| our encode | median 8.6 s (8.4 to 19.0) | median 40.0 s (39.4 to 40.7) |
-| our decode | median 0.18 s (0.16 to 0.23) | median 4.77 s (4.64 to 5.74) |
+| our encode | median 20.7 s (10.3 to 21.9) | median 62.7 s (61.6 to 72.8) |
+| our decode | median 0.14 s (0.13 to 1.02) | median 3.24 s (3.08 to 3.49) |
+| our encode at `da035fe` | median 8.6 s (8.4 to 19.0) | median 40.0 s (39.4 to 40.7) |
+| our decode at `da035fe` | median 0.18 s (0.16 to 0.23) | median 4.77 s (4.64 to 5.74) |
 | paq8px compress | median 504 s (342 to 652) | median 9,791 s (9,548 to 10,110) |
 | paq8px decompress | median 478 s (220 to 900) | median 7,888 s (7,712 to 8,041) |
 
@@ -237,14 +323,22 @@ coder; decoding uses the eight performance cores. paq8px is single-threaded and
 ran several processes at once. Decode times include the Python wrapper and the
 SHA-256 check. In round 2 (below), single-threaded JPEG XL effort 9 decoded a
 crop in about 0.05 s and a native image in 0.56 to 1.05 s, so our decoder is
-roughly four to nine times slower than JPEG XL.
+roughly three to six times slower than JPEG XL; the two mixed crops (pencils_b
+and tools_b, about 1 s) are slower again.
 
-A crop encode is mostly training: about 6.4 s of Adam steps, 1.1 s of
-quantization-aware pass and weight search, 0.3 s of features, and 0.1 s for a
-quick JPEG XL floor. Crops whose two widths finish within the race margin
-(cards_b and clips here) train both and take about 19 s. A native encode spends
-about 4.2 s on features, 23.6 s on Adam steps, 4.0 s on the quantization-aware
-pass and search, 0.7 s on the floor, and 4.7 s on the final decode check.
+v5 encodes these images more slowly than `da035fe` did because its width race
+allows for mixing. It keeps a width that is close once mixing is counted, and
+keeps every width while the weights are a tenth of the best mixed estimate,
+which they are on small, clean crops. So 15 of the 16 crops trained widths 12
+and 32 side by side on the GPU, about 16 to 19 s each, where one width alone
+takes about 8 s (garden_table, the one crop that dropped width 32, took
+10.3 s). The native images are compressible enough to race widths 24 and 48,
+and all four trained both (48 to 55 s). Only guitar_head and the native ducks
+kept the second width, for 1,644 and 2,611 bytes. Beyond training, a crop
+spends about 1.2 s trying mixing, and a native image 1.5 s on the fits, 2.6 s
+on each width's weight search, 2.2 s screening mixing and 3.2 s checking the
+file. Decoding is faster than at `da035fe` because of `7eb6a2c`, which runs
+the same integer arithmetic with less work per sample.
 
 ## Photos: development Tecnick images
 

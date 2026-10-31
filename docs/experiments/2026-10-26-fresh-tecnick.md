@@ -27,6 +27,11 @@ and 1.06% below paq8px** (11 of 16 images smaller), and the native images
 0.19% smaller, 23.27% below JPEG XL effort 10 and **1.75% below paq8px**
 ([second re-measure](#re-measure-at-da035fe)).
 
+NNEX v5, developed on LPCB and other NASA images, then ran on the cohort at
+`ea118a7`. Its crops coded 0.33% smaller (1.39% below paq8px) and its
+native images 0.04% smaller (1.79% below paq8px), but encoding took 2.4 and
+1.6 times as long ([v5 re-measure](#re-measure-with-nnex-v5-at-ea118a7)).
+
 For scale: round 2's validated files on its own 24 images were 6.70% larger
 than paq8px on the crops and 2.14% larger on the native images. Those images
 have been development data since, and the round-3 encoder makes their files
@@ -480,6 +485,50 @@ pixels. Today's files use feature set 4, whose two least-squares fits the
 decoder repeats per sample, and width 48 on the natives, so they decode two
 to three times more slowly even though encoding got five times faster.
 
+### Re-measure with NNEX v5 at `ea118a7`
+
+NNEX v5 adds context mixing, value sets and a width race that allows for
+mixing ([LPCB v5 notebook](2026-10-31-lpcb-v5.md)). It was developed on LPCB
+and other NASA images; no v5 setting was chosen on these images, and v5 had
+not run on them before. `fresh_validation.py` re-ran at `ea118a7` with a
+clean tree, one image at a time, on AC power with a browser and chat apps
+open (summary:
+[`2026-10-31-tecnick-fresh-ea118a7.json`](../results/2026-10-31-tecnick-fresh-ea118a7.json)).
+
+| | `da035fe` | `ea118a7` |
+|---|---:|---:|
+| 16 crops, bytes | 1,523,239 | **1,518,194** (−0.33%) |
+| crops vs JPEG XL effort 10 | 28.83% smaller | 29.07% smaller |
+| crops vs paq8px -9L | 1.06% smaller (11/16) | 1.39% smaller (11/16) |
+| 4 natives, bytes | 6,404,016 | **6,401,366** (−0.04%) |
+| natives vs JPEG XL effort 10 | 23.27% smaller | 23.31% smaller |
+| natives vs paq8px -9L | 1.75% smaller (4/4) | 1.79% smaller (4/4) |
+| encode, 512×512 | median 8.6 s (8.4 to 19.0) | median 20.7 s (10.3 to 21.9) |
+| encode, 2400×2400 | median 40.0 s (39.4 to 40.7) | median 62.7 s (61.6 to 72.8) |
+| decode, 512×512 | median 0.18 s (0.16 to 0.23) | median 0.14 s (0.13 to 1.02) |
+| decode, 2400×2400 | median 4.77 s (4.64 to 5.74) | median 3.24 s (3.08 to 3.49) |
+
+Five images account for nearly all of the change: the crops ducks (1,694
+bytes smaller), guitar_head (1,644, now width 32), pencils_b (845, mixed) and
+tools_b (529, mixed), and the native ducks (2,611, now width 24 with 8.3 kB
+of weights instead of 16.0 kB). Mixing was kept on those two crops only; on
+the others it saved under 0.002 bytes per pixel (238 bytes on baloons, for
+example), so they kept the network alone. cards_b, 31 bytes larger, is the
+only image that grew by more than 5 bytes. paq8px still wins the same five
+crops, now by 0.80% to 1.65%.
+
+Encoding is slower because of the v5 width race. It keeps a width that is
+close once mixing is allowed for, and keeps every width while the weights are
+a tenth of the best mixed estimate, which they are on small, clean crops. So
+15 of the 16 crops trained both widths side by side on the GPU (16 to 19 s
+each, against about 8 s for one width alone); only garden_table dropped width
+32. Since `a35ad83`, native images this compressible race widths 24 and 48,
+and all four trained both (48 to 55 s). Only guitar_head and the native ducks
+kept the second width. Decoding is faster because of `7eb6a2c`, except on the
+two mixed crops (about 1 s).
+
+All 20 files decoded exactly, and the x86_64 build decoded them to the same
+pixels and re-encoded each to identical bytes.
 ## Speed
 
 All timings are from one Apple M4 Pro (8 performance and 4 efficiency cores,
@@ -684,6 +733,9 @@ python $LP/verify_cross_isa.py data/probe/fresh-da035fe/*.coded \
   --paq8px ../../../$R/paq8px-tecnick-fresh-*.json \
   --cross-isa ../../../$R/neural-cross-isa-da035fe-tecnick-fresh.json \
   --out ../../../docs/results/2026-10-27-tecnick-fresh-da035fe.json)
+# NNEX v5: the same at ea118a7, saving to data/probe/fresh-ea118a7, receipts
+# local-probability-ea118a7-*, neural-cross-isa-ea118a7-tecnick-fresh.json and
+# summary docs/results/2026-10-31-tecnick-fresh-ea118a7.json
 # the first neural build, from its own worktree with its own backend build
 # (measure_checkout.py is newer; it imports the checkout's compress.py)
 git worktree add tmp/base-wt f53cb0f
@@ -701,11 +753,11 @@ The x86_64 backend is built as in the
 
 - Twenty fresh images from one studio set. Four native images cannot pin
   down how the native result varies by scene.
-- paq8px still wins 5 of the 16 fresh crops at `da035fe`, by up to 2.8%.
-  Model bytes are 2.0% to 6.8% of a crop file, so small images remain the
-  weak point.
-- The fresh cohort has now been measured three times (`6c0131e`, `a82b98a`,
-  `da035fe`), its crops checked once more after a choice at `6ba3831`, and
+- paq8px still wins 5 of the 16 fresh crops at `da035fe`, by up to 2.8%,
+  and at `ea118a7`, by up to 1.7%. Model bytes are 2.0% to 6.8% of a crop
+  file, so small images remain the weak point.
+- The fresh cohort has now been measured four times (`6c0131e`, `a82b98a`,
+  `da035fe`, `ea118a7`), its crops checked once more after a choice at `6ba3831`, and
   the old build `f53cb0f` run on it for comparison. No setting was chosen
   from its results, but each further look makes it slightly weaker evidence
   than the first. The 62 LPCB camera photos
