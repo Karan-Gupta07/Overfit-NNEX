@@ -161,22 +161,32 @@ def test_race_continues_only_the_best_score(experiment):
     import threading
 
     manager = multiprocessing.get_context("spawn").Manager()
+
+    def results(margin, rows):
+        race = experiment.Race(manager, len(rows), margin)
+        got = [None] * len(rows)
+
+        def run(i, row):
+            got[i] = race.report(i, 2, *row)
+
+        threads = [threading.Thread(target=run, args=item) for item in enumerate(rows)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(30)
+        return got
+
+    def mixed(stream, weights):
+        return stream + weights, stream * experiment.MIX_ABSORB + weights
+
     try:
         for margin, want in ((0.0, [True, False, False]), (0.06, [True, True, False])):
-            race = experiment.Race(manager, 3, margin)
-            got = [None] * 3
-
-            def run(i, score, race=race, got=got):
-                got[i] = race.report(i, 2, score)
-
-            threads = [
-                threading.Thread(target=run, args=(i, s)) for i, s in enumerate((100, 105, 120))
-            ]
-            for thread in threads:
-                thread.start()
-            for thread in threads:
-                thread.join(30)
-            assert got == want
+            assert results(margin, [(100,), (105,), (120,)]) == want
+        # A width also continues when it leads with the bits mixing absorbs,
+        # and every width does while the weights are a large share of that.
+        rows = [mixed(1000, 30), mixed(1040, 10), mixed(1100, 20)]
+        assert results(0.0, rows) == [True, True, False]
+        assert results(0.0, [mixed(100, 30), mixed(130, 25)]) == [True, True]
         race = experiment.Race(manager, 2)
         race.abort()
         assert race.report(12, 2, 1e9)

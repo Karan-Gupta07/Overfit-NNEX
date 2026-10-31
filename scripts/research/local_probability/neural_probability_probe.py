@@ -891,15 +891,19 @@ def _estimator(x, y, a, dimensions, mixtures, pixels):
 # checkpoint: at a 32nd of training on the development crops, the two widths'
 # ratio of such estimates moved by up to 15% between runs whose learning rates
 # differed by a millionth, and the ratio of averaged bits by at most 1.5%.
-def race_score(fused, nets, mean_bits, pixels):
-    """Estimated plane bytes: mean_bits per sample of each plane, plus its RACE_BITS weights."""
+def race_score(fused, nets, mean_bits, pixels, absorb=None):
+    """Estimated plane bytes: mean_bits per sample of each plane, plus its RACE_BITS weights.
+
+    With absorb, also the score that counts only that share of the bits (see mixing_absorb).
+    """
     snapshot = [copy.deepcopy(net) for net in nets]
     fused.export(snapshot)
     states = [model_search.round_state(state, RACE_BITS) for state in _states(snapshot)]
-    return sum(
-        b * pixels / 8 + model_search.plane_bytes(state)
-        for b, state in zip(mean_bits, states, strict=True)
-    )
+    stream = sum(b * pixels / 8 for b in mean_bits)
+    weights = sum(model_search.plane_bytes(state) for state in states)
+    if absorb is None:
+        return stream + weights
+    return stream + weights, stream * absorb + weights
 
 
 def _fit_fused(args, x, y, a, nets, dimensions, planes, prior, count, mark, extras):
@@ -924,12 +928,14 @@ def _fit_fused(args, x, y, a, nets, dimensions, planes, prior, count, mark, extr
     if race is not None or estimate is not None:
 
         def report(mean_bits):
-            score = race_score(fused, nets, mean_bits, extras["pixels"])
+            absorb = getattr(args, "mixing_absorb", None)
+            score = race_score(fused, nets, mean_bits, extras["pixels"], absorb)
+            score, absorbed = score if absorb is not None else (score, None)
             if estimate is not None:
                 estimate(score)
             if race is None:
                 return True
-            return race.report(args.hidden, getattr(args, "feature_set", 0), score)
+            return race.report(args.hidden, getattr(args, "feature_set", 0), score, absorbed)
 
         at = race.checkpoint(args.epochs) if race is not None else args.estimate_at
         checkpoint = (at, report)
@@ -1045,6 +1051,7 @@ def run(path, args):
             search["mixing_file"] = str(mixing_path)
             search["mixing_labels"] = mixing["labels"]
             search["mixing_estimated_bytes"] = mixing["network_estimated_bytes"]
+            search["mixing_absorbed_bytes"] = mixing["estimated_bytes"]
     model_path = None
     if feature_set == 0:
         metadata = compress(encode_cbor([*header, tensors]))

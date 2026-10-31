@@ -54,8 +54,10 @@ _STRIP = struct.Struct("<2I")
 # Raw RGBA samples of the largest image the strips hold, plus a header: an
 # uncompressed PPM of a 46-megapixel LPCB image is 139 MB.
 MAX_SOURCE_BYTES = MAX_STRIPS * coder.MAX_PIXELS * 4 + 4096
-# (maximum pixels, hidden widths): weights cost less per pixel on larger images.
-WIDTH_TIERS = ((1_000_000, (12, 32)), (4_000_000, (24, 48)), (coder.MAX_PIXELS, (48,)))
+# (maximum pixels, hidden widths): weights cost less per pixel on larger images,
+# but not on very compressible ones once mixed: width 48 weights were a quarter
+# of the mixed PIA13779 (5.4 MP), and width 24 made it 12% smaller.
+WIDTH_TIERS = ((1_000_000, (12, 32)), (coder.MAX_PIXELS, (24, 48)))
 # Quantization-aware snapshots, in chain order, and their learning rate. The
 # weight search never picked 8- or 7-bit snapshots on 20 Tecnick images (crops
 # and natives), so they were dropped. With GPTQ rounding the 10-bit snapshot
@@ -90,6 +92,9 @@ SMALL_MAX_NORM = 30.0
 # 9.9% on the other nine, which it lost, in each of three runs.
 RACE_FRACTION = 32
 RACE_MARGIN = 0.03
+# Mixed, weights were a quarter of PIA13779 at width 48, and width 24 won by
+# 12%; at a 32nd of training, the race had dropped it.
+RACE_KEEP_SHARE = 0.1
 RACE_TIMEOUT = 3600.0
 # The floor waits until every worker has its features on the GPU: building them
 # is CPU-bound, while the floor has all of training to finish beside it.
@@ -154,14 +159,31 @@ class Race:
     def checkpoint(epochs: int) -> int:
         return max(1, epochs // RACE_FRACTION)
 
-    def report(self, hidden: int, feature_set: int, score: float) -> bool:
-        self.scores[(hidden, feature_set)] = score
+    def report(
+        self, hidden: int, feature_set: int, score: float, absorbed: float | None = None
+    ) -> bool:
+        """Whether to keep training: score within margin of the best, or for mixing, see below.
+
+        absorbed scores the model for mixing, counting MIX_ABSORB of its bits.
+        Every width keeps training while the best absorbed score's weights are
+        at least RACE_KEEP_SHARE of it: early scores do not tell which width
+        wins once mixed there.
+        """
+        self.scores[(hidden, feature_set)] = (score, absorbed)
         try:
             self.barrier.wait(RACE_TIMEOUT)
         except threading.BrokenBarrierError:
             # A worker failed or stalled: keep training rather than guess.
             return True
-        return score <= min(self.scores.values()) * (1 + self.margin)
+        rows = list(self.scores.values())
+        if score <= min(row[0] for row in rows) * (1 + self.margin):
+            return True
+        mixed = [row for row in rows if row[1] is not None]
+        if absorbed is None or not mixed:
+            return False
+        plain, best = min(mixed, key=lambda row: row[1])
+        weights = plain - (plain - best) / (1 - MIX_ABSORB)
+        return absorbed <= best * (1 + self.margin) or weights >= RACE_KEEP_SHARE * best
 
     def abort(self) -> None:
         self.barrier.abort()
@@ -529,6 +551,7 @@ def learn(job: dict) -> dict:
         )
         if search.get("mixing_file"):
             choices["mixing_model"] = search["mixing_file"]
+            choices["mixing_estimate"] = search["mixing_absorbed_bytes"]
     else:
         choices = precision_search(
             snapshot,
@@ -692,7 +715,8 @@ def compress(
     dropped: list[dict] = []
     phases: dict[str, float] = {}
     learned_best = None
-    mixing = None
+    mixing_models: list[tuple[float, dict, bytes]] = []
+    mixing: dict | None = None
     opaque = bool(np.all(rgba[..., 3] == 255))
     rgb = np.ascontiguousarray(rgba[..., :3])
     # Learned models train on, and v5 codes, ranks among shared sample values.
@@ -824,7 +848,7 @@ def compress(
         for job, result in zip(jobs, results, strict=True):
             hidden, feature_set = job["training"]["hidden"], job["training"]["feature_set"]
             phases[f"train-h{hidden}-f{feature_set}"] = result["train_seconds"]
-            score = scores.get((hidden, feature_set))
+            score, _absorbed = scores.get((hidden, feature_set), (None, None))
             if result["dropped"]:
                 dropped.append(
                     {"hidden": hidden, "feature_set": feature_set}
@@ -849,8 +873,11 @@ def compress(
             chosen = result["choices"]["selected"]
             blob = Path(chosen["file"]).read_bytes()
             if learned_best is None or len(blob) < len(learned_best[0]):
-                mixing_model = result["choices"].get("mixing_model")
-                learned_best = (blob, labels, mixing_model and Path(mixing_model).read_bytes())
+                learned_best = (blob, labels)
+            mixing_model = result["choices"].get("mixing_model")
+            if mixing_model is not None:
+                estimate = result["choices"]["mixing_estimate"]
+                mixing_models.append((estimate, labels, Path(mixing_model).read_bytes()))
             if best is None or len(blob) < len(best):
                 best = blob
                 selected = {
@@ -862,19 +889,31 @@ def compress(
                     selected["weights"] = chosen["weights"]
         if envelope == 5 and learned_best is not None:
             mark = time.perf_counter()
-            blob, labels, mixing_model = learned_best
-            fits = local.get(labels["feature_set"])
+            # Every width that finished training mixes: the narrower one can win
+            # once mixed (PIA13799: 4.8% smaller at width 12 than at 32), and
+            # estimates with MIX_ABSORB of the bits did not tell which.
+            blob, labels = learned_best
             network = coder.model_payload(blob)
-            mixed, mixing = _mix(rgb, network, mixing_model or network, values, fits, len(best))
+            models = sorted(mixing_models, key=lambda row: row[0]) or [(0.0, labels, network)]
+            mixing = {"layouts": [], "screens": []}
+            floor_bytes, smallest = len(best), None
+            for _estimate, labels, payload in models:
+                fits = local.get(labels["feature_set"])
+                mixed, tried = _mix(rgb, network, payload, values, fits, floor_bytes)
+                for row in tried["layouts"]:
+                    candidates.append({**labels, **row})
+                    mixing["layouts"].append({"hidden": labels["hidden"], **row})
+                if "screen" in tried:
+                    mixing["screens"].append({"hidden": labels["hidden"], **tried["screen"]})
+                if mixed is not None and (smallest is None or len(mixed) < len(smallest[0])):
+                    smallest = (mixed, labels)
             phases["mixing"] = time.perf_counter() - mark
-            for row in mixing["layouts"]:
-                candidates.append({**labels, **row})
-            if mixed is not None:
-                best = mixed
+            if smallest is not None:
+                best, labels = smallest
                 selected = {
                     **labels,
-                    "layout": coder.v5_layout(mixed),
-                    "model_bytes": len(coder.model_payload(mixed)),
+                    "layout": coder.v5_layout(best),
+                    "model_bytes": len(coder.model_payload(best)),
                 }
     if best is None:
         raise ValueError("no eligible candidate; enable the conventional floor")

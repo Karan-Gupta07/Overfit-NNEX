@@ -113,8 +113,8 @@ spread and errors), four logistic components, and causal error context. The
 encoder gets the fits of the whole image once from `nnproto-integer local-fit`
 and reuses them for every complete file it codes, so the backend must be built
 before training with feature set 3 or 4.
-Hidden widths follow image size: 12 and 32 up to 1,000,000 pixels, 24 and 48 up
-to 4,000,000, and 48 above. Training runs 800 epochs, capped at 51,200 × 8192
+Hidden widths follow image size: 12 and 32 up to 1,000,000 pixels, 24 and 48
+above. Training runs 800 epochs, capped at 51,200 × 8192
 samples (73 epochs at 2400×2400), with Adam at 0.015, 5% warmup and cosine
 decay to a 1% floor, seed 20261023, four CPU threads, and MPS when available.
 Images up to 1,000,000 pixels use batch 4096, a per-plane clip norm of 30 and
@@ -130,9 +130,12 @@ as a complete file, plus the best uniform-grid model when its estimate is within
 0.05%. Estimates spend bits as the integer coder does: its logistic is exactly
 0 or 1 beyond ±16, and every value keeps one of 2^20 counts. (Training's
 objective clamps the mass of the coded range instead, which comes out negative
-for means far below the range, and searches that used it chose such roundings.) Parallel widths race: after a 32nd of their epochs only widths
-whose estimate (recent mean training bits plus 10-bit model bytes) is within
-3% of the best keep training. The PyTorch path (`--torch-training`)
+for means far below the range, and searches that used it chose such roundings.)
+Parallel widths race: after a 32nd of their epochs only widths whose estimate
+(recent mean training bits plus 10-bit model bytes) is within 3% of the best
+keep training. For v5, so does a width within 3% of the best estimate that
+counts 30% of those bits, and every width does while that best estimate's
+weights make up a tenth of it; each width that finishes then mixes. The PyTorch path (`--torch-training`)
 instead tries weight grids labelled 16/12/10/8/7/6 bits, in that order,
 stopping after the first file that grows. Every file is independently
 verified before it is kept. Quantized tensors are entropy-coded exact binary16
