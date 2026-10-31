@@ -767,6 +767,7 @@ def test_v5_least_squares_wavefront_and_precomputed_fits(
     fits = tmp_path / "fits"
     coder.local_fits(pixels, feature_set).tofile(fits)
     assert coder.encode_v5(pixels, payload, layout=layout, fits=fits) == blob
+    assert coder.encode_v5(pixels, payload, layout=layout, fits=fits, checked=True) == blob
     for threads in (1, 2, 8):
         monkeypatch.setattr(coder, "THREADS", threads)
         assert np.array_equal(coder.decode(blob), pixels)
@@ -841,6 +842,22 @@ def test_v5_value_map(coder, monkeypatch):
         short[start : start + 32] = bytes([1]) + bytes(31)
         with pytest.raises(ValueError, match="value map"):
             coder.decode(bytes(short))
+
+
+@pytest.mark.parametrize("layout", ["s3", "b2", "g3"])
+def test_v5_checked_encodes_are_the_same_file_and_verified(coder, layout):
+    pixels = (5 * np.random.default_rng(71).integers(0, 52, (19, 40, 3))).astype(np.uint8)
+    payload = v3_model(40, 19, 1, grid=True, scale=0.3)
+    for values in (None, coder.shared_values(pixels)):
+        blob = coder.encode_v5(pixels, payload, layout=layout, values=values)
+        assert not coder.verified(blob, pixels)
+        assert coder.encode_v5(pixels, payload, layout=layout, values=values, checked=True) == blob
+        assert coder.verified(blob, pixels)
+    wrong = pixels.copy()
+    wrong[3, 4, 1] ^= 1
+    assert not coder.verified(blob, wrong)
+    assert not coder.verified(blob, np.ascontiguousarray(pixels[:, :-1]))
+    assert not coder.verified(blob[:-1] + bytes([blob[-1] ^ 1]), pixels)
 
 
 def test_v5_bits_of_unused_samples_are_not_coded(coder, monkeypatch):

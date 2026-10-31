@@ -160,10 +160,18 @@ MIX_SCREEN = 0.001
 # 2.3% smaller than that, and mixing it saved only 0.1% more.
 SCREEN_LEAD = 32
 # Images up to BOTH_GATES pixels code ungated and gated mixing and keep the
-# smaller; above it the gate costs little and saves much decoding time. Images
-# over MIX_BANDS_FROM pixels mix in two column bands per plane.
+# smaller; above it the gate costs little and saves much decoding time. Mixing
+# codes a thread per plane and band, so more bands decode faster, but each
+# band's model learns alone. Images up to SCREEN_MIX pixels (over BOTH_GATES)
+# mix in one band and in two and keep the smaller: of the seven such LPCB images, two bands
+# saved 7.0 KB on five and lost on two. Larger ones screen in one band (two
+# over MIX_BANDS_FROM pixels) and mix in one more unless mixing saved BAND_GAIN
+# of the network's bytes there. On LPCB the extra band decoded 14% to 45%
+# faster; it cost under 0.2% (and saved 0.21% on PIA13803) where screens saved
+# under 10%, but 0.8% on PIA13810 (21%) and 0.6% on PIA13915 (33%).
 BOTH_GATES = 1_000_000
 MIX_BANDS_FROM = 8_000_000
+BAND_GAIN = 0.1
 # R and B planes that nearly repeat G (order-0 entropy of their difference from
 # G under GRAY_BITS per sample, on every GRAY_STEP-th row and column) also code
 # with their networks cut to a constant (coder.constant_planes), and the
@@ -310,7 +318,8 @@ def pack_strips(width: int, parts: list[tuple[int, bytes]]) -> bytes:
     )
 
 
-def _decompress_strips(blob: bytes) -> np.ndarray:
+def _strip_files(blob: bytes) -> tuple[int, list[tuple[int, bytes]]]:
+    """(width, [(rows, complete file)]) of a STRIPS_MAGIC file, top to bottom."""
     offset = len(STRIPS_MAGIC) + _STRIPS_HEAD.size
     if len(blob) < offset:
         raise ValueError("truncated strip file")
@@ -338,16 +347,53 @@ def _decompress_strips(blob: bytes) -> np.ndarray:
             raise ValueError("nested strip file")
         parts.append(part)
     files = [
-        _unshare(part, parts, rows) if part.startswith(SHARED_MAGIC) else part
+        (rows, _unshare(part, parts, rows) if part.startswith(SHARED_MAGIC) else part)
         for (rows, _), part in zip(table, parts, strict=True)
     ]
+    return width, files
+
+
+def _decode_strips(width: int, files: list[tuple[int, bytes]]) -> list[np.ndarray]:
+    if not files:
+        return []
     # Strips are independent files, and a mixed strip decodes on only a few
     # threads (one per plane and band), so strips decode side by side.
-    with ThreadPoolExecutor(strip_decoders(files)) as pool:
-        strips = list(pool.map(decompress, files))
-    if any(rgba.shape != (rows, width, 4) for (rows, _), rgba in zip(table, strips, strict=True)):
+    with ThreadPoolExecutor(strip_decoders([file for _, file in files])) as pool:
+        strips = list(pool.map(decompress, [file for _, file in files]))
+    if any(rgba.shape != (rows, width, 4) for (rows, _), rgba in zip(files, strips, strict=True)):
         raise ValueError("strip shape")
-    return np.concatenate(strips, axis=0)
+    return strips
+
+
+def _decompress_strips(blob: bytes) -> np.ndarray:
+    return np.concatenate(_decode_strips(*_strip_files(blob)), axis=0)
+
+
+def check_strips(blob: bytes, rgba: np.ndarray) -> int:
+    """Raises unless decompress(blob) is rgba; returns how many strips it decoded.
+
+    Strips are read as decompress reads them; one whose file decoded as it was
+    coded (coder.verified) against its rows of an opaque rgba is not decoded.
+    """
+    if len(blob) > MAX_FILE_BYTES or not blob.startswith(STRIPS_MAGIC):
+        raise ValueError("expected a strip file within the byte budget")
+    width, files = _strip_files(blob)
+    if width != rgba.shape[1]:
+        raise AssertionError("strip file width")
+    pending, top = [], 0
+    for rows, file in files:
+        tile = rgba[top : top + rows]
+        top += rows
+        opaque = tile.shape[0] == rows and bool(np.all(tile[..., 3] == 255))
+        if not (opaque and coder.verified(file, np.ascontiguousarray(tile[..., :3]))):
+            pending.append((rows, file, tile))
+    if top != rgba.shape[0]:
+        raise AssertionError("strip file height")
+    decoded = _decode_strips(width, [(rows, file) for rows, file, _ in pending])
+    for (_, _, tile), strip in zip(pending, decoded, strict=True):
+        if not np.array_equal(strip, tile):
+            raise AssertionError("selected complete file failed independent RGBA decoding")
+    return len(pending)
 
 
 def _memory() -> int:
@@ -362,21 +408,43 @@ def strip_decoders(files: list[bytes]) -> int:
     return max(1, min(len(files), int(STRIP_MEMORY * _memory() // tables)))
 
 
-def parallel_coders(shape: tuple[int, ...], layouts, jobs: int) -> int:
+def _fitting_coders(shape: tuple[int, ...], layouts, checked: bool) -> int:
+    h, w = shape[:2]
+    cores = os.cpu_count() or 1
+    copies = 2 if checked else 1
+    threads = max(cores if kind[0] == "s" else copies * 3 * int(kind[1:]) for kind in layouts)
+    tables = copies * max(coder.layout_table_bytes(w, h, kind) for kind in layouts)
+    count = max(1, cores // threads)
+    if tables:
+        count = min(count, int(STRIP_MEMORY * _memory() // tables))
+    return count
+
+
+def parallel_coders(shape: tuple[int, ...], layouts, jobs: int, checked: bool = False) -> int:
     """How many of jobs v5 encodes of an image of shape in layouts run at once.
 
     A mixed encode runs one thread per plane and band, so several share the
     cores while their context tables fit in STRIP_MEMORY of the machine's
-    memory. A network-only encode uses every core.
+    memory; checked (coder.encode_v5), its decoder takes as many threads and
+    tables again. A network-only encode uses every core.
     """
-    h, w = shape[:2]
-    cores = os.cpu_count() or 1
-    threads = max(cores if kind[0] == "s" else 3 * int(kind[1:]) for kind in layouts)
-    tables = max(coder.layout_table_bytes(w, h, kind) for kind in layouts)
-    count = min(jobs, cores // threads)
-    if tables:
-        count = min(count, int(STRIP_MEMORY * _memory() // tables))
-    return max(1, count)
+    return max(1, min(jobs, _fitting_coders(shape, layouts, checked)))
+
+
+def checked_mixing(shape: tuple[int, ...], layouts, jobs: int) -> bool:
+    """Whether jobs mixed encodes in layouts decode as they code (coder.encode_v5 checked).
+
+    A file that decoded beside its encoder needs no final decode, which for a
+    mixed file takes longer than the encode. They check only if all of them,
+    with their decoders, run at once and their tables fit in memory; one may
+    take more threads than there are cores: on 12 cores a three-band strip of
+    STA13843 coded in 21 s and decoded in 24 s, and took 38 s checked.
+    """
+    return (
+        jobs > 0
+        and all(kind[0] != "s" for kind in layouts)
+        and _fitting_coders(shape, layouts, checked=True) >= jobs
+    )
 
 
 def _unshare(part: bytes, parts: list[bytes], rows: int) -> bytes:
@@ -399,7 +467,9 @@ def _shared_part(rgb: np.ndarray, own: bytes, index: int, donor: bytes) -> bytes
     """rgb, whose own file is own, coded with the model of donor strip index."""
     payload = coder.with_height(coder.model_payload(donor), rgb.shape[0])
     values = coder.v5_values(donor)
-    blob = coder.encode_v5(rgb, payload, layout=coder.v5_layout(own), values=values)
+    layout = coder.v5_layout(own)
+    checked = checked_mixing(rgb.shape, [layout], 1)
+    blob = coder.encode_v5(rgb, payload, layout=layout, values=values, checked=checked)
     body = blob[: coder.HEADER_SIZE] + blob[coder.HEADER_SIZE + len(payload) :]
     return SHARED_MAGIC + bytes([index]) + body
 
@@ -437,8 +507,10 @@ def share_models(
         if donor != k and _covers(values[donor], rgbs[k])
     ]
     jobs = [(k, k) for k in eligible] + pairs
-    # Mixed strips also code side by side in screen_mixing; bands are small.
-    with ThreadPoolExecutor(4) as pool:
+    # Bands are small, so up to four code at once while their threads fit the cores.
+    cores = os.cpu_count() or 1
+    threads = max(cores if kind[0] == "s" else 3 * int(kind[1:]) for kind in layouts.values())
+    with ThreadPoolExecutor(max(1, min(4, cores // threads))) as pool:
         bands = dict(
             zip(
                 jobs,
@@ -501,8 +573,7 @@ def _compress_strips(path: Path, pixels: np.ndarray, options: dict) -> tuple[byt
     else:
         rgba = pixels
     mark = time.perf_counter()
-    if not np.array_equal(decompress(best), rgba):
-        raise AssertionError("selected complete file failed independent RGBA decoding")
+    decoded = check_strips(best, rgba)
     check_seconds = time.perf_counter() - mark
     strips = [
         {
@@ -525,6 +596,7 @@ def _compress_strips(path: Path, pixels: np.ndarray, options: dict) -> tuple[byt
         "strips": strips,
         "shared_models": sharing,
         "exact_rgba": True,
+        "checked_encode": len(parts) - decoded,
         "seconds": time.perf_counter() - start,
         "phase_seconds": {
             **{f"strip-{k}": round(row["seconds"], 2) for k, row in enumerate(strips, 1)},
@@ -548,11 +620,18 @@ def decompress(blob: bytes) -> np.ndarray:
     return np.concatenate([rgb, np.full((*rgb.shape[:2], 1), 255, np.uint8)], axis=2)
 
 
-def mixing_layouts(pixels: int) -> tuple[str, ...]:
-    """v5 context-mixing layouts tried for an image of this many pixels."""
+def mixing_layouts(pixels: int, gain: float | None = None) -> tuple[str, ...]:
+    """v5 context-mixing layouts tried for an image of this many pixels.
+
+    gain is the share of the network's bytes that mixing saved on the screen
+    band (screen_mixing in mixing_layouts(pixels)[-1]), if one was coded.
+    """
     if pixels <= BOTH_GATES:
         return ("b1", "g1")
-    return ("g2",) if pixels > MIX_BANDS_FROM else ("g1",)
+    if pixels <= SCREEN_MIX:
+        return ("g1", "g2")
+    bands = 2 if pixels > MIX_BANDS_FROM else 1
+    return (f"g{bands + 1 if gain is not None and gain < BAND_GAIN else bands}",)
 
 
 def _stream_bytes(blob: bytes) -> int:
@@ -595,15 +674,21 @@ def screen_mixing(
     subtracted. Its first row is even, keeping the network's parity features.
     """
     top, lead, rows = screen_band(rgb.shape[0])
-    jobs = [
-        (count, kind, model)
-        for kind, model in (("s1", network), (layout, payload))
-        for count in (lead + rows, lead)
-    ]
-    with ThreadPoolExecutor(len(jobs)) as pool:
-        whole, alone, mixed, mixed_alone = pool.map(
-            lambda job: _top_stream_bytes(rgb, top, *job, values), jobs
+    counts = (lead + rows, lead)
+    # The network codes its rows on one thread; mixed bands at once only while
+    # their threads fit the cores (parallel_coders).
+    band = (lead + rows, *rgb.shape[1:])
+    with (
+        ThreadPoolExecutor(2) as network_pool,
+        ThreadPoolExecutor(parallel_coders(band, [layout], 2)) as mixed_pool,
+    ):
+        plain = network_pool.map(
+            lambda count: _top_stream_bytes(rgb, top, count, "s1", network, values), counts
         )
+        coded = mixed_pool.map(
+            lambda count: _top_stream_bytes(rgb, top, count, layout, payload, values), counts
+        )
+        (whole, alone), (mixed, mixed_alone) = plain, coded
     return {
         "rows": rows,
         "lead": lead,
@@ -622,34 +707,54 @@ def _mix(
     alone. The models and layouts code side by side (parallel_coders).
     """
     pixels = rgb.shape[0] * rgb.shape[1]
-    layouts = mixing_layouts(pixels)
     reports: list[dict] = [{"layouts": []} for _ in models]
     if pixels > SCREEN_MIX:
         # Screened with the image's own (banded) layout: two bands cost about 0.8%.
         with ThreadPoolExecutor(len(models)) as pool:
             screens = pool.map(
-                lambda model: screen_mixing(rgb, network, model[0], values, layouts[-1]), models
+                lambda model: screen_mixing(
+                    rgb, network, model[0], values, mixing_layouts(pixels)[-1]
+                ),
+                models,
             )
             for report, screen in zip(reports, screens, strict=True):
                 report["screen"] = screen
-    jobs = [
-        (k, layout)
-        for k, report in enumerate(reports)
-        if "screen" not in report
-        or report["screen"]["network"] - report["screen"]["mixed"]
-        >= MIX_SCREEN * report["screen"]["pixels"]
-        for layout in layouts
-    ]
+
+    def saving(k: int, share: float) -> bool:
+        screen = reports[k].get("screen")
+        return screen is None or screen["network"] - screen["mixed"] >= share * screen["pixels"]
+
+    def layouts(k: int) -> tuple[str, ...]:
+        screen = reports[k].get("screen")
+        if screen is None:
+            return mixing_layouts(pixels)
+        gain = (screen["network"] - screen["mixed"]) / max(1, screen["network"])
+        return mixing_layouts(pixels, gain)
+
+    jobs = [(k, kind) for k in range(len(models)) if saving(k, MIX_SCREEN) for kind in layouts(k)]
+    kinds = sorted({layout for _, layout in jobs}) or list(mixing_layouts(pixels))
+    # Candidates check as they code (checked_mixing) unless their screen says
+    # they will not save MIX_GAIN, so the file that wins needs no final decode.
+    check = checked_mixing(rgb.shape, kinds, len(jobs))
+    checks = [check and saving(k, MIX_GAIN) for k, _ in jobs]
     mixed: list[bytes | None] = [None] * len(models)
-    with ThreadPoolExecutor(parallel_coders(rgb.shape, layouts, len(jobs))) as pool:
+    coders = parallel_coders(rgb.shape, kinds, len(jobs), checked=any(checks))
+    with ThreadPoolExecutor(coders) as pool:
         blobs = pool.map(
-            lambda job: coder.encode_v5(
-                rgb, models[job[0]][0], layout=job[1], values=values, fits=models[job[0]][1]
+            lambda job, checked: coder.encode_v5(
+                rgb,
+                models[job[0]][0],
+                layout=job[1],
+                values=values,
+                fits=models[job[0]][1],
+                checked=checked,
             ),
             jobs,
+            checks,
         )
-        for (k, layout), candidate in zip(jobs, blobs, strict=True):
-            reports[k]["layouts"].append({"layout": layout, "complete_file_bytes": len(candidate)})
+        for (k, layout), checked, candidate in zip(jobs, checks, blobs, strict=True):
+            row = {"layout": layout, "complete_file_bytes": len(candidate), "checked": checked}
+            reports[k]["layouts"].append(row)
             if mixed[k] is None or len(candidate) < len(mixed[k]):
                 mixed[k] = candidate
     return [
@@ -687,19 +792,27 @@ def _constant_gray(
     report: dict = {"planes": list(planes), "layouts": []}
 
     def code(jobs: list[tuple[bool, str]]) -> list[bytes]:
-        coders = parallel_coders(rgb.shape, [kind for _, kind in jobs], len(jobs))
+        kinds = [kind for _, kind in jobs]
+        checked = checked_mixing(rgb.shape, kinds, len(jobs))
+        coders = parallel_coders(rgb.shape, kinds, len(jobs), checked=checked)
         with ThreadPoolExecutor(coders) as pool:
             blobs = list(
                 pool.map(
                     lambda job: coder.encode_v5(
-                        rgb, payloads[job[0]], layout=job[1], values=values, fits=fits
+                        rgb,
+                        payloads[job[0]],
+                        layout=job[1],
+                        values=values,
+                        fits=fits,
+                        checked=checked,
                     ),
                     jobs,
                 )
             )
         for (fold, kind), blob in zip(jobs, blobs, strict=True):
-            row = {"layout": kind, "fold": fold, "complete_file_bytes": len(blob)}
-            report["layouts"].append(row)
+            report["layouts"].append(
+                {"layout": kind, "fold": fold, "complete_file_bytes": len(blob), "checked": checked}
+            )
         return blobs
 
     payloads = {fold: coder.constant_planes(model, planes, fold) for fold in (False, True)}
@@ -1209,7 +1322,9 @@ def compress(
                     }
     if best is None:
         raise ValueError("no eligible candidate; enable the conventional floor")
-    if check:
+    # A file that decoded as it was coded (coder.verified) is not decoded again.
+    checked_encode = opaque and coder.verified(best, rgb)
+    if check and not checked_encode:
         mark = time.perf_counter()
         if not np.array_equal(decompress(best), rgba):
             raise AssertionError("selected complete file failed independent RGBA decoding")
@@ -1222,6 +1337,7 @@ def compress(
         "selected": selected,
         "candidates": candidates,
         "exact_rgba": check,
+        "checked_encode": checked_encode,
         "learned_skipped": None
         if learned and opaque
         else ("disabled" if not learned else "nonopaque"),

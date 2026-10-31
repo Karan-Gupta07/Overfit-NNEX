@@ -1356,11 +1356,83 @@ static void run_v5(const Model& m,Canvas& c,int bands,bool gated,const V5Values&
         if(y>=0&&y<H)code_job(slot,b,y);
     },&failed);
 }
-static Bytes encode_v5(const Model& m,Canvas& c,V5Layout layout,int threads,bool fitted){
+// A mixed body's head: flags, band count and the planes' value maps.
+struct V5Head{uint8_t flags=0;int bands=0;V5Values values;};
+// Reads the head of a mixed body and returns where its stream lengths start.
+static size_t read_v5_head(const Model& m,const Bytes& source,V5Head& head){
+    require(source.size()>=2,"truncated arithmetic stream");
+    size_t pos=2;head.flags=source[0];head.bands=source[1];
+    require(head.flags&V5_MIXING&&head.flags<=(V5_MIXING|V5_GATED|V5_VALUES),"invalid v5 flags");
+    require(head.bands>=1&&head.bands<=v5_band_limit(m.w),"invalid band count");
+    if(head.flags&V5_VALUES){
+        require(source.size()>pos,"truncated value map");const uint8_t mask=source[pos++];
+        require(mask>=1&&mask<=7,"invalid value map");
+        for(int s=0;s<3;s++){
+            if(!((mask>>s)&1))continue;
+            require(source.size()>=pos+32,"truncated value map");std::array<bool,256> used{};
+            for(int v=0;v<256;v++)used[size_t(v)]=(source[pos+size_t(v/8)]>>(v%8))&1;
+            pos+=32;
+            require(std::count(used.begin(),used.end(),true)>0,"empty value map");
+            head.values.set(V5_ORDER[size_t(s)],used);
+        }
+    }
+    return pos;
+}
+// The count band streams that follow a head at pos: their lengths, then their bytes.
+static std::vector<std::pair<const uint8_t*,size_t>> read_v5_streams(const Bytes& source,size_t pos,size_t count){
+    std::vector<uint64_t> sizes(count);uint64_t total=0;
+    for(auto& size:sizes){size=read_varint(source,pos);total+=size;}
+    require(total==source.size()-pos,"invalid stream lengths");
+    std::vector<std::pair<const uint8_t*,size_t>> streams;
+    for(const uint64_t size:sizes){streams.emplace_back(source.data()+pos,size_t(size));pos+=size;}
+    return streams;
+}
+static void decode_v5(const Model& m,Canvas& c,const Bytes& source,int threads){
+    require(!source.empty(),"truncated arithmetic stream");
+    const uint8_t flags=source[0];
+    require(flags==0||(flags&V5_MIXING&&flags<=(V5_MIXING|V5_GATED|V5_VALUES)),"invalid v5 flags");
+    if(!(flags&V5_MIXING)){
+        decode_split(m,c,Bytes(source.begin()+1,source.end()),threads,true);return;
+    }
+    V5Head head;const size_t pos=read_v5_head(m,source,head);
+    const auto streams=read_v5_streams(source,pos,size_t(3)*head.bands);
+    std::vector<v5::Decoder> decoders;
+    for(const auto& [data,size]:streams)decoders.emplace_back(data,size);
+    run_v5(m,c,head.bands,head.flags&V5_GATED,head.values,threads,true,[&](int s){
+        return [&,s](int p,int){return decoders[size_t(s)].get(uint32_t(p));};
+    });
+}
+// A band stream that a decoder reads while its encoder writes it. The encoder
+// publishes how many bytes are final, and ends the stream once finish() has
+// appended the rest; until then a reader past the published bytes waits.
+struct LiveStream{const uint8_t* data=nullptr;std::atomic<size_t> size{0};std::atomic<bool> ended{false};};
+struct LiveSource{
+    const LiveStream* live;size_t pos=0,known=0;
+    uint32_t next(){
+        while(pos>=known){
+            const bool ended=live->ended.load(std::memory_order_acquire);
+            known=live->size.load(std::memory_order_acquire);
+            if(pos<known)break;
+            if(ended)return 0u;
+            std::this_thread::yield();
+        }
+        return live->data[pos++];
+    }
+};
+// With checked, a decoder codes beside the encoder on its own canvas, from
+// the head as decode_v5 parses it and each band stream as it is written, and
+// the encode fails unless every sample decodes and the body parses back into
+// the same streams.
+static Bytes encode_v5(const Model& m,Canvas& c,V5Layout layout,int threads,bool fitted,bool checked){
     if(!(layout.flags&V5_MIXING)){
         Bytes out{layout.flags};
         const Bytes body=encode_image(m,c,std::min(layout.count,m.h),threads,true,fitted,true);
-        out.insert(out.end(),body.begin(),body.end());return out;
+        out.insert(out.end(),body.begin(),body.end());
+        if(checked){
+            Canvas d(m.w,m.h,m.fits);decode_v5(m,d,out,threads);
+            require(d.pixels==c.pixels,"v5 stream does not decode");
+        }
+        return out;
     }
     const int bands=std::min(layout.count,v5_band_limit(m.w));
     for(int ch:{1,0,2})parallel(m.h,threads,[&](int y){
@@ -1381,49 +1453,68 @@ static Bytes encode_v5(const Model& m,Canvas& c,V5Layout layout,int threads,bool
             maps.push_back(byte);
         }
     }
-    std::vector<v5::Encoder> coders(size_t(3)*bands);
-    run_v5(m,c,bands,layout.flags&V5_GATED,values,threads,false,[&](int s){
-        return [&,s](int p,int bit){coders[size_t(s)].put(bit,uint32_t(p));return bit;};
-    });
-    Bytes out{uint8_t(layout.flags|(maps[0]?V5_VALUES:0)),uint8_t(bands)};std::vector<Bytes> parts;
+    Bytes out{uint8_t(layout.flags|(maps[0]?V5_VALUES:0)),uint8_t(bands)};
     if(maps[0])out.insert(out.end(),maps.begin(),maps.end());
-    for(auto& coder:coders){parts.push_back(coder.finish());put_varint(out,parts.back().size());}
-    for(auto& part:parts)out.insert(out.end(),part.begin(),part.end());
+    const size_t count=size_t(3)*bands,head_size=out.size();
+    std::vector<v5::Encoder> coders(count);std::vector<Bytes> parts(count);
+    if(!checked){
+        run_v5(m,c,bands,layout.flags&V5_GATED,values,threads,false,[&](int s){
+            return [&,s](int p,int bit){coders[size_t(s)].put(bit,uint32_t(p));return bit;};
+        });
+        for(size_t s=0;s<count;s++)parts[s]=coders[s].finish();
+    }else{
+        V5Head head;require(read_v5_head(m,out,head)==head_size,"v5 head does not parse");
+        // A coded bit appends at most four bytes, and finish() four more, so
+        // reserved streams never move while the decoder reads them.
+        std::vector<LiveStream> live(count);std::vector<size_t> published(count,0);
+        for(size_t s=0;s<count;s++){
+            const int b=int(s%size_t(bands));
+            const int64_t columns=int64_t(m.w)*(b+1)/bands-int64_t(m.w)*b/bands;
+            coders[s].out.reserve(size_t(32*columns*m.h+8));live[s].data=coders[s].out.data();
+        }
+        Canvas d(m.w,m.h,m.fits);std::exception_ptr failure;
+        std::thread decoder([&]{
+            try{
+                std::vector<v5::SourceDecoder<LiveSource>> decoders;decoders.reserve(count);
+                for(const auto& stream:live)decoders.emplace_back(LiveSource{&stream});
+                run_v5(m,d,head.bands,head.flags&V5_GATED,head.values,int(count),true,[&](int s){
+                    return [&,s](int p,int){return decoders[size_t(s)].get(uint32_t(p));};
+                });
+            }catch(...){failure=std::current_exception();}
+        });
+        auto end=[&]{for(auto& stream:live)stream.ended.store(true,std::memory_order_release);};
+        try{
+            run_v5(m,c,bands,layout.flags&V5_GATED,values,threads,false,[&](int s){
+                return [&,s](int p,int bit){
+                    Bytes& o=coders[size_t(s)].out;coders[size_t(s)].put(bit,uint32_t(p));
+                    if(o.size()!=published[size_t(s)]){
+                        require(o.size()+8<=o.capacity(),"live stream overflow");
+                        published[size_t(s)]=o.size();live[size_t(s)].size.store(o.size(),std::memory_order_release);
+                    }
+                    return bit;
+                };
+            });
+            for(size_t s=0;s<count;s++){
+                parts[s]=coders[s].finish();
+                require(parts[s].data()==live[s].data,"live stream moved");
+                live[s].size.store(parts[s].size(),std::memory_order_release);
+            }
+        }catch(...){end();decoder.join();throw;}
+        end();decoder.join();
+        if(failure)std::rethrow_exception(failure);
+        require(d.pixels==c.pixels,"v5 stream does not decode");
+    }
+    for(const auto& part:parts)put_varint(out,part.size());
+    for(const auto& part:parts)out.insert(out.end(),part.begin(),part.end());
+    if(checked){
+        V5Head head;const auto streams=read_v5_streams(out,read_v5_head(m,out,head),count);
+        for(size_t s=0;s<count;s++)
+            require(streams[s].second==parts[s].size()&&
+                    std::equal(parts[s].begin(),parts[s].end(),streams[s].first),"v5 streams do not parse");
+    }
     return out;
 }
-static void decode_v5(const Model& m,Canvas& c,const Bytes& source,int threads){
-    require(!source.empty(),"truncated arithmetic stream");
-    const uint8_t flags=source[0];
-    require(flags==0||(flags&V5_MIXING&&flags<=(V5_MIXING|V5_GATED|V5_VALUES)),"invalid v5 flags");
-    if(!(flags&V5_MIXING)){
-        decode_split(m,c,Bytes(source.begin()+1,source.end()),threads,true);return;
-    }
-    require(source.size()>=2,"truncated arithmetic stream");
-    size_t pos=2;const int bands=source[1];
-    require(bands>=1&&bands<=v5_band_limit(m.w),"invalid band count");
-    V5Values values;
-    if(flags&V5_VALUES){
-        require(source.size()>pos,"truncated value map");const uint8_t mask=source[pos++];
-        require(mask>=1&&mask<=7,"invalid value map");
-        for(int s=0;s<3;s++){
-            if(!((mask>>s)&1))continue;
-            require(source.size()>=pos+32,"truncated value map");std::array<bool,256> used{};
-            for(int v=0;v<256;v++)used[size_t(v)]=(source[pos+size_t(v/8)]>>(v%8))&1;
-            pos+=32;
-            require(std::count(used.begin(),used.end(),true)>0,"empty value map");
-            values.set(V5_ORDER[size_t(s)],used);
-        }
-    }
-    const size_t count=size_t(3)*bands;
-    std::vector<uint64_t> sizes(count);uint64_t total=0;
-    for(auto& size:sizes){size=read_varint(source,pos);total+=size;}
-    require(total==source.size()-pos,"invalid stream lengths");
-    std::vector<v5::Decoder> decoders;
-    for(size_t s=0;s<count;s++){decoders.emplace_back(source.data()+pos,size_t(sizes[s]));pos+=sizes[s];}
-    run_v5(m,c,bands,flags&V5_GATED,values,threads,true,[&](int s){
-        return [&,s](int p,int){return decoders[size_t(s)].get(uint32_t(p));};
-    });
-}
+
 static int count_argument(const char* text,int low,int high){
     char* end=nullptr;long value=std::strtol(text,&end,10);
     require(end!=text&&*end==0&&value>=low&&value<=high,"invalid thread or stream count");
@@ -1476,16 +1567,17 @@ int main(int argc,char** argv){
     try{
         if(argc>1&&std::string(argv[1])=="local-fit")return local_fit_main(argc,argv);
         require(argc>=5&&argc<=8,
-                "usage: nnproto-integer encode|decode|encode-v4|decode-v4|encode-v5|decode-v5 "
+                "usage: nnproto-integer encode|decode|encode-v4|decode-v4|encode-v5|encode-v5-checked|decode-v5 "
                 "config input output [threads [streams|layout [fits]]]");
         const std::string mode=argv[1];
-        const bool mixing=mode=="encode-v5"||mode=="decode-v5";
+        const bool checked=mode=="encode-v5-checked";
+        const bool mixing=mode=="encode-v5"||mode=="decode-v5"||checked;
         const bool split=mode=="encode-v4"||mode=="decode-v4";
-        const bool encoding=mode=="encode"||mode=="encode-v4"||mode=="encode-v5";
+        const bool encoding=mode=="encode"||mode=="encode-v4"||mode=="encode-v5"||checked;
         require(encoding||mode=="decode"||split||mixing,"invalid mode");
         int threads=argc>5?count_argument(argv[5],0,MAX_STREAMS):0;
         if(!threads)threads=automatic_threads(!encoding);
-        require(argc<7||mode=="encode-v4"||mode=="encode-v5","only encode-v4 and encode-v5 take a stream count");
+        require(argc<7||mode=="encode-v4"||mode=="encode-v5"||checked,"only encoders take a stream count");
         const int streams=argc>6&&!mixing?count_argument(argv[6],1,MAX_STREAMS):DEFAULT_STREAMS;
         const V5Layout layout=argc>6&&mixing?layout_argument(argv[6]):V5Layout{};
         Model m(load(argv[2],1024*1024));Canvas c(m.w,m.h,m.fits);
@@ -1496,7 +1588,7 @@ int main(int argc,char** argv){
             for(size_t i=0;i<size_t(m.w)*m.h;i++)
                 for(int ch=0;ch<3;ch++)c.pixels[ch][i]=source[3*i+ch];
             if(argc>7)load_fits(m,c,argv[7]);
-            if(mixing)output=encode_v5(m,c,layout,threads,argc>7);
+            if(mixing)output=encode_v5(m,c,layout,threads,argc>7,checked);
             else output=encode_image(m,c,split?std::min(streams,m.h):1,threads,split,argc>7);
         }else{
             if(mixing)decode_v5(m,c,source,threads);

@@ -96,7 +96,7 @@ static inline void shifted(const int32_t* in,int n,int32_t* x15,int32_t* x13){
 // The mixing streams' carryless binary arithmetic coder, 32 bits wide with
 // bytewise output. p is the probability of a one in 1/65536, 1 to 65535; a one
 // takes the lower part of the interval. finish() appends the fewest bytes that,
-// followed by zeros, lie in the final interval, and Decoder reads zeros past
+// followed by zeros, lie in the final interval, and a decoder reads zeros past
 // the end of its bytes.
 struct Encoder{
     uint32_t x1=0,x2=0xffffffffu;std::vector<uint8_t> out;
@@ -113,17 +113,25 @@ struct Encoder{
         return std::move(out);
     }
 };
-struct Decoder{
-    const uint8_t* in;size_t size,pos=0;uint32_t x1=0,x2=0xffffffffu,x=0;
-    Decoder(const uint8_t* data,size_t n):in(data),size(n){for(int k=0;k<4;k++)x=(x<<8)|next();}
+// A decoder takes its bytes from Source::next().
+struct ByteSource{
+    const uint8_t* in;size_t size,pos=0;
     uint32_t next(){return pos<size?in[pos++]:0u;}
+};
+template<class Source>
+struct SourceDecoder{
+    Source source;uint32_t x1=0,x2=0xffffffffu,x=0;
+    explicit SourceDecoder(Source s):source(s){for(int k=0;k<4;k++)x=(x<<8)|source.next();}
     int get(uint32_t p){
         const uint32_t xmid=x1+uint32_t((uint64_t(x2-x1)*p)>>16);
         const int bit=x<=xmid;
         if(bit)x2=xmid;else x1=xmid+1;
-        while(((x1^x2)>>24)==0){x1<<=8;x2=(x2<<8)|255;x=(x<<8)|next();}
+        while(((x1^x2)>>24)==0){x1<<=8;x2=(x2<<8)|255;x=(x<<8)|source.next();}
         return bit;
     }
+};
+struct Decoder:SourceDecoder<ByteSource>{
+    Decoder(const uint8_t* data,size_t n):SourceDecoder<ByteSource>(ByteSource{data,n}){}
 };
 
 // Weights in 1/65536. Updates skip errors under DEAD_ZONE; the rate of a weight

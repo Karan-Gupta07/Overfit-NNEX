@@ -85,6 +85,7 @@ def test_large_image_is_one_file_of_strips(experiment, tmp_path, monkeypatch, ch
     assert report["selected"] == {"format": "strips", "count": 2}
     assert [strip["rows"] for strip in report["strips"]] == [4, 3]
     assert report["complete_file_bytes"] == len(blob)
+    assert report["checked_encode"] == 0
     if channels == 3:
         pixels = np.concatenate([pixels, np.full((7, 5, 1), 255, np.uint8)], axis=2)
     assert np.array_equal(experiment.decompress(blob), pixels)
@@ -152,14 +153,28 @@ def test_strips_can_share_one_model(experiment, tmp_path, monkeypatch):
             experiment.decompress(experiment.pack_strips(5, [parts[0], (6, truncated)]))
     files = [blob for _, blob in parts]
     tables = max(experiment.coder.v5_table_bytes(f) for f in files)
-    assert experiment.strip_decoders(files) == (2 if tables else 2)
+    assert experiment.strip_decoders(files) == 2
     cores = os.cpu_count() or 1
     assert experiment.parallel_coders((7, 32, 3), ["b1", "g1"], 4) == max(1, min(4, cores // 3))
     assert experiment.parallel_coders((7, 32, 3), ["s16", "g1"], 2) == 1
     assert experiment.parallel_coders((7, 32, 3), ["g1"], 0) == 1
+    checked = max(1, min(4, cores // 6))
+    assert experiment.parallel_coders((7, 32, 3), ["b1", "g1"], 4, checked=True) == checked
+    assert experiment.checked_mixing((7, 32, 3), ["b1", "g1"], 2) is (checked >= 2)
+    assert experiment.checked_mixing((7, 32, 3), ["s16", "g1"], 1) is False
+    assert experiment.checked_mixing((7, 32, 3), ["g1"], 0) is False
+    with monkeypatch.context() as patch:
+        # A checked one-band encode and its decoder take six threads.
+        patch.setattr(experiment.os, "cpu_count", lambda: 6)
+        assert experiment.checked_mixing((7, 32, 3), ["g1"], 1)
+        assert not experiment.checked_mixing((7, 32, 3), ["g1"], 2)
+        # One checked encode may take more threads than there are cores.
+        assert experiment.checked_mixing((7, 32, 3), ["g2"], 1)
+        assert not experiment.checked_mixing((7, 32, 3), ["g2"], 2)
     monkeypatch.setattr(experiment, "STRIP_MEMORY", 0.0)
     assert experiment.strip_decoders(files) == (1 if tables else 2)
     assert experiment.parallel_coders((7, 32, 3), ["b1", "g1"], 4) == 1
+    assert not experiment.checked_mixing((7, 32, 3), ["g1"], 1)
     assert np.array_equal(experiment.decompress(blob), rgba)
     chosen, report = experiment.share_models(strips, parts)
     assert len(report["screens"]) == 2
@@ -171,6 +186,49 @@ def test_strips_can_share_one_model(experiment, tmp_path, monkeypatch):
     assert donor is not None and chosen[donor] == parts[donor]
     assert chosen[1 - donor][1].startswith(experiment.SHARED_MAGIC)
     assert np.array_equal(experiment.decompress(experiment.pack_strips(5, chosen)), rgba)
+
+
+def test_strip_check_decodes_only_strips_not_checked_as_coded(experiment, tmp_path, monkeypatch):
+    monkeypatch.setattr(experiment.coder, "MAX_PIXELS", 40)
+    coder = experiment.coder
+    pixels = np.random.default_rng(73).integers(0, 256, (12, 5, 3), np.uint8)
+    rgba = np.concatenate([pixels, np.full((12, 5, 1), 255, np.uint8)], axis=2)
+    parts = []
+    for top in (0, 6):
+        path = tmp_path / f"strip-{top}.png"
+        Image.fromarray(pixels[top : top + 6]).save(path)
+        blob, _ = experiment.compress(
+            path,
+            widths=(4,),
+            feature_sets=(1,),
+            epochs=0,
+            device="cpu",
+            conventional=False,
+            hybrid=False,
+            check=False,
+        )
+        parts.append((6, blob))
+    blob = experiment.pack_strips(5, parts)
+    assert experiment.check_strips(blob, rgba) == 2
+    first = parts[0][1]
+    checked = coder.encode_v5(
+        np.ascontiguousarray(pixels[:6]),
+        coder.model_payload(first),
+        layout=coder.v5_layout(first),
+        values=coder.v5_values(first),
+        checked=True,
+    )
+    assert checked == first and coder.verified(first, pixels[:6])
+    assert experiment.check_strips(blob, rgba) == 1
+    for row in (2, 9):
+        wrong = rgba.copy()
+        wrong[row, 1, 0] ^= 1
+        with pytest.raises(AssertionError, match="failed independent"):
+            experiment.check_strips(blob, wrong)
+    with pytest.raises(AssertionError, match="height"):
+        experiment.check_strips(blob, rgba[:11])
+    with pytest.raises(ValueError, match="strip file"):
+        experiment.check_strips(first, rgba)
 
 
 def test_no_candidate_is_an_error(experiment, tmp_path):
@@ -227,6 +285,42 @@ def test_large_images_race_a_narrow_width_only_when_compressible(experiment):
     assert experiment.default_widths(12_000_000, 10**6) == experiment.COMPRESSIBLE_WIDTHS
 
 
+def test_mixing_adds_a_band_where_the_screen_gains_little(experiment, monkeypatch):
+    layouts = experiment.mixing_layouts
+    assert layouts(experiment.BOTH_GATES) == ("b1", "g1")
+    assert layouts(experiment.SCREEN_MIX) == ("g1", "g2")
+    mid, large = experiment.SCREEN_MIX + 1, experiment.MIX_BANDS_FROM + 1
+    assert layouts(mid) == layouts(mid, experiment.BAND_GAIN) == ("g1",)
+    assert layouts(mid, experiment.BAND_GAIN / 2) == ("g2",)
+    assert layouts(large) == layouts(large, 0.5) == ("g2",)
+    assert layouts(large, 0.0) == ("g3",)
+    # Each model mixes in the layout its own screen chose.
+    monkeypatch.setattr(experiment, "BOTH_GATES", 0)
+    monkeypatch.setattr(experiment, "SCREEN_MIX", 0)
+    mixed = {b"high": 50, b"low": 95}
+    monkeypatch.setattr(
+        experiment,
+        "screen_mixing",
+        lambda rgb, network, payload, values, layout: {
+            "pixels": 64,
+            "network": 100,
+            "mixed": mixed[payload],
+            "layout": layout,
+        },
+    )
+    coded = []
+
+    def encode(rgb, payload, *, layout, values, fits, checked):
+        coded.append((payload, layout))
+        return b"x" * 10
+
+    monkeypatch.setattr(experiment.coder, "encode_v5", encode)
+    rgb = np.zeros((8, 8, 3), np.uint8)
+    results = experiment._mix(rgb, b"network", [(b"high", None), (b"low", None)], None, 1000)
+    assert sorted(coded) == [(b"high", "g1"), (b"low", "g2")]
+    assert [report["screen"]["layout"] for _, report in results] == ["g1", "g1"]
+
+
 def test_gray_planes_code_with_constant_networks_when_smaller(experiment, monkeypatch):
     rng = np.random.default_rng(59)
     g, noise = rng.integers(0, 256, (2, 16, 16))
@@ -246,7 +340,7 @@ def test_gray_planes_code_with_constant_networks_when_smaller(experiment, monkey
     )
     monkeypatch.setattr(coder, "v5_layout", lambda blob: blob.decode())
 
-    def encode(pixels, payload, layout, values, fits):
+    def encode(pixels, payload, layout, values, fits, checked=False):
         size = sizes[layout]
         if isinstance(size, tuple):
             return bytes(size[payload == b"fold"])

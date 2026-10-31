@@ -639,7 +639,7 @@ def _stream(
         sf.write_bytes(np.ascontiguousarray(pixels).tobytes())
         if mode is None:
             mode = "encode" if streams is None else "encode-v4"
-        timeout = V5_TIMEOUT if mode == "encode-v5" else TIMEOUT
+        timeout = V5_TIMEOUT if mode.startswith("encode-v5") else TIMEOUT
         call(mode, cf, sf, out, integer=integer, streams=streams, fits=fits, timeout=timeout)
         stream = out.read_bytes()
     if len(stream) > MAX_STREAM_BYTES:
@@ -748,25 +748,69 @@ def check_layout(layout) -> None:
         raise ValueError("v5 layout")
 
 
+# Files from encode_v5(checked=True), by SHA-256: the SHA-256 of the
+# configuration and of the stream that the backend decoded as it coded them.
+_CHECKED: dict[bytes, tuple[bytes, bytes]] = {}
+
+
 def encode_v5(
-    pixels: np.ndarray, payload: bytes, *, layout: str = "g1", values=None, fits=None
+    pixels: np.ndarray,
+    payload: bytes,
+    *,
+    layout: str = "g1",
+    values=None,
+    fits=None,
+    checked: bool = False,
 ) -> bytes:
     """The v3 model with bounded component means, coded in a V5_KINDS layout.
 
     With values (shared_values of these pixels) the backend codes each sample's
     rank among them (pack_values), so the payload's network and any fits must
-    be for the packed pixels. fits is as for encode_v4.
+    be for the packed pixels. fits is as for encode_v4. With checked the
+    backend also decodes the streams beside the encoder, from their bytes on a
+    canvas of its own, and fails unless every sample comes back (see verified).
     """
     check_layout(layout)
     head = _v5_head(values)
     coded = pixels if values is None else pack_values(pixels, values)
     config, (w, h) = native_configuration(*parse_v3(payload))
-    native = _stream(config, w, h, coded, integer=True, streams=layout, fits=fits, mode="encode-v5")
+    mode = "encode-v5-checked" if checked else "encode-v5"
+    native = _stream(config, w, h, coded, integer=True, streams=layout, fits=fits, mode=mode)
     stream = head + native
     if len(stream) > MAX_STREAM_BYTES:
         raise ValueError("oversized arithmetic stream")
     digest = hashlib.sha256(pixels.tobytes()).digest()
-    return MAGIC_V5 + struct.pack("<2I", len(payload), len(stream)) + digest + payload + stream
+    blob = MAGIC_V5 + struct.pack("<2I", len(payload), len(stream)) + digest + payload + stream
+    if checked:
+        # The backend checked the ranks; decode maps them back through the head.
+        read, _body = _v5_split(stream)
+        if not np.array_equal(coded if read is None else read[coded], pixels):
+            raise AssertionError("v5 value map does not decode")
+        _CHECKED[hashlib.sha256(blob).digest()] = (
+            hashlib.sha256(config).digest(),
+            hashlib.sha256(stream).digest(),
+        )
+    return blob
+
+
+def verified(blob: bytes, pixels: np.ndarray) -> bool:
+    """Whether decode(blob) returns pixels, known without decoding again.
+
+    True only for a file from encode_v5(checked=True) in this process whose
+    configuration and stream, as decode reads them from blob, are the ones the
+    backend decoded, and whose checksum is that of pixels.
+    """
+    record = _CHECKED.get(hashlib.sha256(blob).digest())
+    if record is None:
+        return False
+    version, config, (w, h), stream = _integer_parts(blob)
+    return (
+        version == 5
+        and pixels.shape == (h, w, 3)
+        and (hashlib.sha256(config).digest(), hashlib.sha256(stream).digest()) == record
+        and blob[FLOAT_HEADER_SIZE:HEADER_SIZE]
+        == hashlib.sha256(np.ascontiguousarray(pixels).tobytes()).digest()
+    )
 
 
 def v5_layout(blob: bytes) -> str:
@@ -843,13 +887,17 @@ def reencode(blob: bytes, pixels: np.ndarray) -> bytes:
     return encode_v3(pixels, payload) if blob.startswith(MAGIC_V3) else encode(pixels, payload)
 
 
-def decode(blob: bytes) -> np.ndarray:
-    version5 = blob.startswith(MAGIC_V5)
-    version4 = blob.startswith(MAGIC_V4)
-    version3 = version5 or version4 or blob.startswith(MAGIC_V3)
-    integer = version3 or blob.startswith(MAGIC)
-    header_size = HEADER_SIZE if integer else FLOAT_HEADER_SIZE
-    if (not integer and not blob.startswith(FLOAT_MAGIC)) or len(blob) < header_size:
+def _integer_parts(blob: bytes) -> tuple[int, bytes, tuple[int, int], bytes]:
+    """(version, backend configuration, (w, h), stream) of a file, as decode reads them.
+
+    version is 0 for float files, 2 for the first integer format, else 3 to 5.
+    """
+    version = next(
+        (v for v, magic in ((5, MAGIC_V5), (4, MAGIC_V4), (3, MAGIC_V3)) if blob.startswith(magic)),
+        2 if blob.startswith(MAGIC) else 0,
+    )
+    header_size = HEADER_SIZE if version else FLOAT_HEADER_SIZE
+    if (not version and not blob.startswith(FLOAT_MAGIC)) or len(blob) < header_size:
         raise ValueError("magic")
     model_size, stream_size = struct.unpack_from("<2I", blob, len(MAGIC))
     if (
@@ -860,21 +908,26 @@ def decode(blob: bytes) -> np.ndarray:
     ):
         raise ValueError("length")
     metadata = blob[header_size : header_size + model_size]
-    stream = blob[header_size + model_size :]
-    values = None
-    if version5:
-        values, stream = _v5_split(stream)
-    if version3:
-        config, (w, h) = native_configuration(*parse_v3(metadata))
+    if version >= 3:
+        config, size = native_configuration(*parse_v3(metadata))
     else:
-        config, (w, h) = configuration(metadata, integer=integer)
+        config, size = configuration(metadata, integer=bool(version))
+    return version, config, size, blob[header_size + model_size :]
+
+
+def decode(blob: bytes) -> np.ndarray:
+    version, config, (w, h), stream = _integer_parts(blob)
+    integer = bool(version)
+    values = None
+    if version == 5:
+        values, stream = _v5_split(stream)
     with temporary_directory() as td:
         directory = Path(td)
         cf, sf, out = (directory / name for name in ("config", "stream", "out"))
         cf.write_bytes(config)
         sf.write_bytes(stream)
-        mode = "decode-v5" if version5 else "decode-v4" if version4 else "decode"
-        call(mode, cf, sf, out, integer=integer, timeout=V5_TIMEOUT if version5 else TIMEOUT)
+        mode = {5: "decode-v5", 4: "decode-v4"}.get(version, "decode")
+        call(mode, cf, sf, out, integer=integer, timeout=V5_TIMEOUT if version == 5 else TIMEOUT)
         pixels = np.frombuffer(out.read_bytes(), np.uint8)
         if pixels.size != w * h * 3:
             raise ValueError("decoded dimensions")
