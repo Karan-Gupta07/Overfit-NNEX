@@ -35,6 +35,12 @@ native images 0.04% smaller (1.79% below paq8px), but encoding took 2.4 and
 halved the crop encodes to a median 10.5 s. One crop grew by 1,095 bytes,
 which leaves the crops 0.26% smaller than at `da035fe` (1.32% below
 paq8px); the native files did not change ([width race](#width-race-at-10fbde6)).
+`de30ed3` and `2063b53`, a later width race and a grey-plane screen chosen
+on development and LPCB images, left the crop files unchanged and cut the
+native encodes from a median 63.8 s to 50.8 s. The native ducks grew by
+2,500 bytes, so the natives are now 150 bytes smaller than at `da035fe`
+(1.75% below paq8px)
+([re-measure](#late-width-race-and-grey-screen-at-de30ed3-and-2063b53)).
 
 For scale: round 2's validated files on its own 24 images were 6.70% larger
 than paq8px on the crops and 2.14% larger on the native images. Those images
@@ -568,6 +574,46 @@ new rule drops would have won. The native images keep both widths within the
 margins, so their files and times are unchanged, still about 1.6 times
 `da035fe`'s encode time. All 20 files decoded exactly, and the x86_64 build
 decoded them to the same pixels and re-encoded each to identical bytes.
+
+### Late width race and grey screen at `de30ed3` and `2063b53`
+
+`de30ed3` races widths after at least two epochs, and with mixing on the
+widths left meet again after an eighth of training. There a width stops if
+a wider one scores lower, unless the wider model's weights are at least 5%
+of its mixed estimate. `2063b53` screens a grey image's constant-plane file
+on a band of rows before mixing it in full
+([LPCB v5 notebook](2026-10-31-lpcb-v5.md#late-width-race-at-de30ed3)). Both
+were chosen on development and LPCB images. `fresh_validation.py` then ran
+here once at `2063b53`, with a clean tree, one image at a time, on AC power
+with a browser and chat apps open (summary:
+[`2026-10-31-tecnick-fresh-2063b53.json`](../results/2026-10-31-tecnick-fresh-2063b53.json)).
+
+| | `10fbde6` | `2063b53` |
+|---|---:|---:|
+| 16 crops, bytes | 1,519,289 | 1,519,289 |
+| 4 natives, bytes | 6,401,366 | 6,403,866 (+0.04%) |
+| natives vs JPEG XL effort 10 | 23.31% smaller | 23.28% smaller |
+| natives vs paq8px -9L | 1.79% smaller (4/4) | 1.75% smaller (4/4) |
+| encode, 512×512 | median 10.5 s (10.1 to 21.6) | median 10.7 s (10.4 to 22.1) |
+| encode, 2400×2400 | median 63.8 s (60.9 to 69.5) | median 50.8 s (48.4 to 52.5) |
+| decode, 512×512 | median 0.16 s (0.13 to 1.06) | median 0.17 s (0.13 to 1.16) |
+| decode, 2400×2400 | median 3.21 s (3.07 to 3.33) | median 3.57 s (3.50 to 3.72) |
+
+All 16 crop files and three of the four native files are byte-identical to
+those of `10fbde6`. On the native ducks, width 48 scored 0.14% lower than
+width 24 after an eighth of training, and its 16.0 kB of weights were 1% of
+its mixed estimate, so width 24 stopped. At `10fbde6` width 24 had
+finished and won, 2,500 bytes (0.16%) smaller. Of these 20 images and the
+50 the rule was traced on, ducks is the only one where a width the late race
+stops would have won. The natives now train their second width for an
+eighth of training instead of all of it, which took the median native
+encode from 63.8 s to 50.8 s (`da035fe`, with one width, took 40.0 s). The grey
+screen changed nothing here. The decoder did not change,
+so the decode times differ by run-to-run variation. paq8px still wins the
+same five crops, by 0.80% to 1.65%. All 20 files decoded exactly, and the
+x86_64 build decoded them to the same pixels and re-encoded each to
+identical bytes.
+
 ## Speed
 
 All timings are from one Apple M4 Pro (8 performance and 4 efficiency cores,
@@ -717,8 +763,8 @@ files within about 0.04%.
   on one Mac.
 - Every paq8px archive decompressed to exactly the source samples before its
   size was counted.
-- The test suite (295 tests) passed at `a1ed669` and again at `a82b98a`, and
-  (320 tests) at `da035fe`.
+- The test suite (295 tests) passed at `a1ed669` and again at `a82b98a`,
+  (320 tests) at `da035fe`, and (395 tests) at `2063b53`.
 
 ## Reproduction
 
@@ -775,7 +821,7 @@ python $LP/verify_cross_isa.py data/probe/fresh-da035fe/*.coded \
 # NNEX v5: the same at ea118a7, saving to data/probe/fresh-ea118a7, receipts
 # local-probability-ea118a7-*, neural-cross-isa-ea118a7-tecnick-fresh.json and
 # summary docs/results/2026-10-31-tecnick-fresh-ea118a7.json; then at 10fbde6
-# with 10fbde6 in place of ea118a7 everywhere
+# and at 2063b53, with that commit in place of ea118a7 everywhere
 # the first neural build, from its own worktree with its own backend build
 # (measure_checkout.py is newer; it imports the checkout's compress.py)
 git worktree add tmp/base-wt f53cb0f
@@ -794,14 +840,15 @@ The x86_64 backend is built as in the
 - Twenty fresh images from one studio set. Four native images cannot pin
   down how the native result varies by scene.
 - paq8px still wins 5 of the 16 fresh crops at `da035fe`, by up to 2.8%,
-  and at `ea118a7` and `10fbde6`, by up to 1.7%. Model bytes are 2.0% to
+  and at `ea118a7`, `10fbde6` and `2063b53`, by up to 1.7%. Model bytes are 2.0% to
   6.8% of a crop file, so small images remain the weak point.
-- The fresh cohort has now been measured five times (`6c0131e`, `a82b98a`,
-  `da035fe`, `ea118a7`, `10fbde6`), its crops checked once more after a choice at `6ba3831`, and
-  the old build `f53cb0f` run on it for comparison. No setting was chosen
-  from its results, but each further look makes it slightly weaker evidence
-  than the first. The `10fbde6` race rule was prompted by the `ea118a7`
-  encode times here, though chosen on other images. The 62 LPCB camera photos
+- The fresh cohort has now been measured six times (`6c0131e`, `a82b98a`,
+  `da035fe`, `ea118a7`, `10fbde6`, `2063b53`), its crops checked once more
+  after a choice at `6ba3831`, and the old build `f53cb0f` run on it for
+  comparison. No setting was chosen from its results, but each further look
+  makes it slightly weaker evidence than the first. The `10fbde6` race rule
+  was prompted by the `ea118a7` encode times here, though chosen on other
+  images. The 62 LPCB camera photos
   ([notes](2026-10-27-lpcb.md)) are a newer fresh test.
 - Decoding is still several times slower than JPEG XL, and the fits make it
   slower than round 2's files.

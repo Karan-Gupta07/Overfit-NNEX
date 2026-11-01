@@ -20,11 +20,11 @@ began as a screenshot codec.
 (efforts 9 and 10), chosen per image. "Fresh" images were never used for
 tuning: the encoder was committed before it first ran on them, and later
 changes were tuned on other images only. The current coder, NNEX v5 at
-commit `10fbde6`, adds a context-mixing stage that was tuned with LPCB
+commit `2063b53`, adds a context-mixing stage that was tuned with LPCB
 images, so its LPCB results are not fresh; the fresh LPCB results are
-NNEX v4's at `2db19a3`. LPCB was measured at `ea118a7`, and `10fbde6`
-codes those images to the same files. The fresh Tecnick photos were
-re-measured at `10fbde6`, and no v5 setting was chosen on them.
+NNEX v4's at `2db19a3`. LPCB was measured at `de30ed3`, and `2063b53`
+re-encoded the three images it changes to the same files. The fresh Tecnick
+photos were re-measured at `2063b53`, and no v5 setting was chosen on them.
 
 Commit hashes before `7eb6a2c` refer to the development history, which was
 squashed into this repository's first commit when it was made public.
@@ -36,7 +36,7 @@ squashed into this repository's first commit when it was made public.
 | photo coder v4 | 62 fresh LPCB camera photos, 10 to 16 Mpx | **16.24% fewer bytes** (median 15.81%) | 62/62 |
 | photo coder v4 | all 107 fresh LPCB images (photos and NASA images) | 15.21% fewer bytes | 99/107 |
 | photo coder v5 | 16 fresh Tecnick studio photos, 512×512 crops | **29.02% fewer bytes** (median 28.28%) | 16/16 |
-| photo coder v5 | 4 fresh Tecnick studio photos, 2400×2400 | **23.31% fewer bytes** (median 23.90%) | 4/4 |
+| photo coder v5 | 4 fresh Tecnick studio photos, 2400×2400 | **23.28% fewer bytes** (median 23.90%) | 4/4 |
 | photo coder, round 2 settings | 24 Tecnick photos, fresh at the time | 24.68% fewer bytes | 24/24 |
 | photo coder, round 1 settings | 12 fresh noisy aerial photos, 512×512 | 4.83% fewer bytes | 12/12 |
 
@@ -46,9 +46,9 @@ smaller in total over all 107 images and 4.04% smaller over the 62 camera
 photos, smaller on every photo and every star field. They are also smaller
 in total than those of cmix (5.76%) and GraLIC (12.08%), the next two
 entries. paq8px still wins 17 of the 25 other NASA images, though over those
-25 ours is 0.21% smaller in total. Fresh, v4 was 1.21% smaller than paq8px
+25 ours is 0.22% smaller in total. Fresh, v4 was 1.21% smaller than paq8px
 over all 107 and 3.91% over the photos. On the 20 fresh Tecnick photos v5's
-files are 1.32% (crops) and 1.79% (2400×2400) smaller than paq8px's, which
+files are 1.32% (crops) and 1.75% (2400×2400) smaller than paq8px's, which
 still wins 5 of the 16 crops.
 
 The Tecnick photos are clean (about 1 to 1.4 bits per sample at the best
@@ -71,7 +71,7 @@ shows up as a larger percentage on Tecnick. Every number above comes from
    mixture of four logistic distributions over the 256 possible values.
 4. **Shrink.** Quantization-aware passes and a per-tensor grid search round
    the weights to whatever grid makes the file smallest. The stored weights
-   take 2.2 to 7.5 kB per fresh crop and 8 to 18 kB per 2400×2400 photo.
+   take 2.2 to 7.5 kB per fresh crop and 16 to 18 kB per 2400×2400 photo.
 5. **Code and check.** An integer-only C++ program runs the network for every
    sample and arithmetic-codes the true value. The file is then decoded
    independently to prove it is exact.
@@ -84,14 +84,14 @@ shows up as a larger percentage on Tecnick. Every number above comes from
 
 No pretrained model or shared dictionary is involved. An ARM64 build and an
 x86_64 build (under Rosetta on the same Mac) decoded every fresh Tecnick file
-and 16 of the v5 LPCB files to the same pixels and re-encoded each to the
+and 17 of the v5 LPCB files to the same pixels and re-encoded each to the
 same bytes.
 
 ## Fresh Tecnick test, totals in bytes
 
 16 centered 512×512 crops and four full 2400×2400 images (the same scenes as
 four of the crops), from TESTIMAGES photographs that earlier rounds left
-unused, coded by v5 at `10fbde6`.
+unused, coded by v5 at `2063b53`.
 
 | codec | 16 crops | our saving | 4 native | our saving |
 |---|---:|---:|---:|---:|
@@ -99,12 +99,13 @@ unused, coded by v5 at `10fbde6`.
 | WebP lossless | 2,733,334 | 44.4% | 11,848,508 | 46.0% |
 | JPEG XL effort 9 | 2,147,237 | 29.2% | 8,905,825 | 28.1% |
 | JPEG XL effort 10 | 2,140,363 | 29.0% | 8,346,560 | 23.3% |
-| paq8px -9L | 1,539,595 | 1.32% | 6,518,112 | 1.79% |
-| ours, v4 at `da035fe` | 1,523,239 | 0.26% | 6,404,016 | 0.04% |
-| **ours** | **1,519,289** | | **6,401,366** | |
+| paq8px -9L | 1,539,595 | 1.32% | 6,518,112 | 1.75% |
+| ours, v4 at `da035fe` | 1,523,239 | 0.26% | 6,404,016 | 0.00% |
+| **ours** | **1,519,289** | | **6,403,866** | |
 
 Against JPEG XL effort 10, per-image savings range from 23.1% to 37.2% on
-the crops and 19.6% to 25.5% on the native images.
+the crops and 19.5% to 25.5% on the native images. The native files are 150
+bytes smaller than v4's in total.
 
 ## LPCB, totals in bytes
 
@@ -114,8 +115,9 @@ The 107 images of the
 images over 16.8 Mpx were coded as two or three strips inside their file.
 paq8px's size is LPCB's published result; the rest were measured here, and
 every file decoded exactly. "v5" is the current coder, measured at
-`ea118a7` (`10fbde6` codes these images to the same files) and tuned with
-these images; "v4, fresh" is `2db19a3`, which had never seen them.
+`de30ed3` (`2063b53` re-encoded the three images it changes to the same
+files) and tuned with these images; "v4, fresh" is `2db19a3`, which had
+never seen them.
 
 | codec | 62 camera photos | v5 saving | all 107 | v5 saving |
 |---|---:|---:|---:|---:|
@@ -127,13 +129,13 @@ these images; "v4, fresh" is `2db19a3`, which had never seen them.
 | cmix v16 (published) | 645,835,881 | 6.29% | 906,796,260 | 5.76% |
 | paq8px -9L (published) | 630,710,768 | 4.04% | 887,823,381 | 3.75% |
 | ours, v4, fresh | 606,034,580 | 0.14% | 877,080,059 | 2.57% |
-| **ours, v5** | **605,200,445** | | **854,572,981** | |
+| **ours, v5** | **605,200,445** | | **854,571,285** | |
 
 v5 is smaller than JPEG XL effort 10 on all 107 images and smaller than
 paq8px on all 62 photos and all 20 star fields. paq8px still wins 17 of the
 25 other NASA images (renders, composites, processed views), mostly small
 ones where our stored weights are most of the difference; over those 25 ours
-is 0.21% smaller in total, against 22.7% larger for v4. The v4 files are in
+is 0.22% smaller in total, against 22.7% larger for v4. The v4 files are in
 the [`lpcb-2db19a3` release](https://github.com/Karan-Gupta07/Overfit-NNEX/releases/tag/lpcb-2db19a3)
 with a script that checks them against LPCB's MD5 sums. See the
 [v5 notebook](docs/experiments/2026-10-31-lpcb-v5.md) and the
@@ -149,11 +151,11 @@ decompressed exactly.
 
 | | 16 crops | 4 native |
 |---|---:|---:|
-| ours vs paq8px, total | 1.32% smaller | 1.79% smaller |
+| ours vs paq8px, total | 1.32% smaller | 1.75% smaller |
 | images where ours is smaller | 11/16 | 4/4 |
 | per-image range | 4.2% smaller to 1.7% larger | 0.6% to 2.9% smaller |
 | paq8px time per image | about 8 min each way | 2.2 to 2.7 hours each way |
-| our time per image | 11 s to encode, 0.16 s to decode | 64 s to encode, 3.2 s to decode |
+| our time per image | 11 s to encode, 0.17 s to decode | 51 s to encode, 3.6 s to decode |
 
 The stored weights are 2.0% to 6.7% of a crop file but only 0.5% to 1.1% of
 a native file, which is most of why small images are the weak point.
@@ -165,16 +167,19 @@ time:
 
 | step | 512×512 | 2400×2400 | 10 to 16 Mpx LPCB photo |
 |---|---:|---:|---:|
-| encode | median 10.5 s | median 63.8 s | median 52.5 s |
-| decode (8 threads) | median 0.16 s | median 3.21 s | median 6.2 s |
+| encode | median 10.7 s | median 50.8 s | median 47.3 s |
+| decode (8 threads) | median 0.17 s | median 3.57 s | median 6.0 s |
 
 Training on the GPU is most of the encode time. Images up to 4 Mpx, and
 cleaner larger ones, race two network widths and train both side by side
-while they are close, as on all four 2400×2400 Tecnick images; that is why
-those encode more slowly than at `da035fe` (40.0 s). Most crops train one
-width; they took 8.6 s at `da035fe` and now spend about 1.5 s more trying
-mixing. Files that keep the network alone decode roughly
-three to six times slower than single-threaded JPEG XL; mixed files are
+while they are close, as on all four 2400×2400 Tecnick images; since
+`de30ed3` the narrower width stops after an eighth of training if the wider
+one leads, so those encode in 51 s (40.0 s at `da035fe`, 64 s before
+`de30ed3`). Most crops train one width; they took 8.6 s at `da035fe` and
+now spend about 1.5 s more trying mixing. The LPCB photos encode and decode
+faster than at `2db19a3` (54.1 s and 9.1 s). Files that keep the network
+alone decode roughly three to six times slower than single-threaded JPEG XL;
+mixed files are
 slower again (the four mixed LPCB photos took 13 to 28 s). See the
 [round 3 notebook](docs/experiments/2026-10-26-fresh-tecnick.md) and the
 [LPCB v5 notebook](docs/experiments/2026-10-31-lpcb-v5.md).
@@ -205,16 +210,17 @@ floor when installed. Options, formats and limits are in the
 
 - 8-bit RGB and RGBA stills only. Images with transparency skip training and
   use the SCDX floor.
-- Encoding needs a GPU to be fast (about 10 s per 512×512 crop and about a
-  minute per 2400×2400 image or 10 to 16 Mpx photo on an M4 Pro), and
+- Encoding needs a GPU to be fast (about 11 s per 512×512 crop and about 50 s
+  per 2400×2400 image or 10 to 16 Mpx photo on an M4 Pro), and
   decoding is slower than JPEG XL. Files that mix (NNEX v5) decode several
   times slower again, and the largest need several GB of memory to decode.
 - Files decode only with the research decoder above (`compress.py --decode`).
 - v4 was tested fresh on 20 studio photos and on LPCB's 107 images (62
   camera photos from four cameras, 45 NASA images). v5 was tuned with LPCB
   images, so its LPCB results are not fresh; on the fresh Tecnick photos it
-  was 0.26% (crops) and 0.04% (2400×2400) smaller than v4 and took about 1.2
-  and 1.6 times as long to encode. Small processed and composited images are a
+  was 0.26% smaller than v4 on the crops and the same size on the 2400×2400
+  images (150 bytes smaller), and took about 1.2 and 1.3 times as long to
+  encode. Small processed and composited images are a
   weak point: paq8px still wins 17 of LPCB's 25 non-star NASA images. Art
   with alpha and lossy targets are untested.
 - cmix and GraLIC are compared only through LPCB's published sizes. The

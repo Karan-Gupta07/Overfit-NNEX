@@ -61,9 +61,17 @@ or arithmetic-coder implementation was copied.
   and halved the crop encodes; one crop grew by 1,095 bytes. It saved
   **29.02%** and **23.31%** against JPEG XL effort 10, was 1.32% (11/16) and
   1.79% (4/4) smaller than paq8px and 0.26% and 0.04% smaller than
-  `da035fe`, and took about 1.2 and 1.6 times as long to encode; all 20 files again
-  decoded exactly and re-encoded identically under Rosetta.
-  [Durable summary](../../../docs/results/2026-10-31-tecnick-fresh-10fbde6.json).
+  `da035fe`, and took about 1.2 and 1.6 times as long to encode
+  ([summary](../../../docs/results/2026-10-31-tecnick-fresh-10fbde6.json)).
+  `de30ed3` and `2063b53` (a later width race and a grey-image screen, chosen
+  on development images and LPCB) left the crop files unchanged and cut the
+  native encodes from a median 63.8 s to 50.8 s; the native ducks grew by
+  2,500 bytes. At `2063b53` it saves **29.02%** and **23.28%** against JPEG
+  XL effort 10, is 1.32% (11/16) and 1.75% (4/4) smaller than paq8px and
+  0.26% and 0.002% smaller than `da035fe`, and takes about 1.25 times as long
+  to encode; all 20 files again decoded exactly and re-encoded identically
+  under Rosetta.
+  [Durable summary](../../../docs/results/2026-10-31-tecnick-fresh-2063b53.json).
 - On the 107 images of the Lossless Photo Compression Benchmark (LPCB), never
   used before, commit `299bc4c` came out **1.21%** smaller in total than
   LPCB's published paq8px v216 -9L sizes (81/107 images), 3.28% smaller than
@@ -79,17 +87,18 @@ or arithmetic-coder implementation was copied.
   [coded files](https://github.com/Karan-Gupta07/Overfit-NNEX/releases/tag/lpcb-2db19a3).
 - NNEX v5 (context mixing on top of the network) was developed with LPCB
   images, mostly the NASA ones, so its LPCB results are **not fresh**. At
-  `ea118a7` it coded the 107 images in 854,572,981 bytes: **3.75%** smaller
+  `de30ed3` it coded the 107 images in 854,571,285 bytes: **3.75%** smaller
   than paq8px -9L (90/107 images), 5.76% smaller than cmix and 12.08%
   smaller than GraLIC. The photos came out 4.04% smaller than paq8px
-  (62/62), the star fields 3.90% (20/20) and the other NASA images 0.21%
+  (62/62), the star fields 3.90% (20/20) and the other NASA images 0.22%
   (paq8px still smaller on 17 of 25); every image is smaller than its best
-  standard baseline. A photo took a median 52.5 s to encode and 6.2 s to
-  decode; mixed files decode several times slower than the network alone.
-  All 107 files match LPCB's MD5 sums (`verify_lpcb.py`). `10fbde6` codes
-  these images to the same files.
+  standard baseline. A photo took a median 47.3 s to encode and 6.0 s to
+  decode, faster both ways than v4 at `2db19a3`; mixed files decode several
+  times slower than the network alone. All 107 files match LPCB's MD5 sums
+  (`verify_lpcb.py`). `2063b53` re-encoded the three images it changes to
+  the same files.
   [Notebook](../../../docs/experiments/2026-10-31-lpcb-v5.md),
-  [durable summary](../../../docs/results/2026-10-31-lpcb-ea118a7.json).
+  [durable summary](../../../docs/results/2026-10-31-lpcb-2063b53.json).
 
 All results are collected in [benchmarks](../../../docs/benchmarks.md).
 See [design](../../../docs/design/15-image-local-probability.md), notebooks for
@@ -201,7 +210,9 @@ written, on a canvas of its own, so the file needs no final decode, and a
 strip file decodes only its strips that were not. R and B planes that nearly
 repeat G (under one bit per sample of order-0 entropy in their difference
 from G) are also coded with their networks cut to a constant, which wins on
-grey images. A strip of an image over the pixel limit may code with another
+grey images; when the best file is the network alone, the constant file also
+mixes, over 2,000,000 pixels only if its own screened band saves 0.001 bytes
+per pixel. A strip of an image over the pixel limit may code with another
 strip's model instead of its own when that file comes out smaller.
 
 Each width trains in its own spawned process while the parent builds the SCDX
@@ -234,8 +245,8 @@ Supported source files are PNG, JPEG, TIFF, WebP, and BMP. Pixel losslessness
 does not preserve original file bytes, EXIF/ICC metadata, or animation; grayscale
 and higher bit depths are not accepted. Decoding is several times slower than
 JPEG XL, and encoding trains a network per image. On an M4 Pro the fresh
-Tecnick run at `10fbde6` took a median 10.5 s to encode a 512×512 crop and
-63.8 s for a 2400×2400 image, and 0.16 s and 3.21 s to decode them. These are
+Tecnick run at `2063b53` took a median 10.7 s to encode a 512×512 crop and
+50.8 s for a 2400×2400 image, and 0.17 s and 3.57 s to decode them. These are
 not statistically stable latency benchmarks.
 
 ## Individual model and precision experiments
@@ -317,7 +328,8 @@ crop of each (`tecnick-fresh-crop512`) and the full image of four of them
 (`tecnick-fresh-2400`). `fresh_validation.py` measures the committed default
 encoder on every image and refuses changed sources. It first ran at
 `6c0131e`; the cohort is known from then on, so later runs (`a82b98a`,
-`da035fe`, `ea118a7`, `10fbde6`) re-measure settings tuned elsewhere.
+`da035fe`, `ea118a7`, `10fbde6`, `2063b53`) re-measure settings tuned
+elsewhere.
 
 `fetch_lpcb.py` downloads LPCB's original PPM archive (from the Wayback
 Machine), its MD5 list and its published per-image paq8px, cmix and GraLIC
