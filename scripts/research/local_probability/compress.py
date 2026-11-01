@@ -751,6 +751,11 @@ def screen_mixing(
     }
 
 
+def _screen_saves(screen: dict, share: float) -> bool:
+    """Whether screen_mixing's band saved share bytes per pixel by mixing."""
+    return screen["network"] - screen["mixed"] >= share * screen["pixels"]
+
+
 def _mix(
     rgb: np.ndarray, network: bytes, models: list[tuple[bytes, object]], values, best: int
 ) -> list[tuple[bytes | None, dict]]:
@@ -775,7 +780,7 @@ def _mix(
 
     def saving(k: int, share: float) -> bool:
         screen = reports[k].get("screen")
-        return screen is None or screen["network"] - screen["mixed"] >= share * screen["pixels"]
+        return screen is None or _screen_saves(screen, share)
 
     def layouts(k: int) -> tuple[str, ...]:
         screen = reports[k].get("screen")
@@ -837,7 +842,9 @@ def _constant_gray(
     Both constants (coder.constant_planes with and without fold) code in
     source's layout. A network-only source also mixes the smaller one, and
     keeps a mixed file only if that saves MIX_GAIN bytes per pixel over the
-    smaller network-only file.
+    smaller network-only file. Over SCREEN_MIX pixels it mixes only if its
+    screen band (screen_mixing) saves MIX_SCREEN, as in _mix: on LPCB no such
+    mixed constant was kept, and screening saved 11 s to 19 s on each.
     """
     pixels = rgb.shape[0] * rgb.shape[1]
     layout = coder.v5_layout(source)
@@ -874,7 +881,13 @@ def _constant_gray(
     smallest = coded[fold] if len(coded[fold]) < best else None
     if layout.startswith("s"):
         limit = min(best, len(coded[fold])) - MIX_GAIN * pixels
-        for candidate in code([(fold, kind) for kind in mixing_layouts(pixels)]):
+        kinds = mixing_layouts(pixels)
+        if pixels > SCREEN_MIX:
+            screen = screen_mixing(rgb, payloads[fold], payloads[fold], values, kinds[-1])
+            report["screen"] = screen
+            gain = (screen["network"] - screen["mixed"]) / max(1, screen["network"])
+            kinds = mixing_layouts(pixels, gain) if _screen_saves(screen, MIX_SCREEN) else ()
+        for candidate in code([(fold, kind) for kind in kinds]) if kinds else ():
             if len(candidate) < min(limit, len(smallest) if smallest else best):
                 smallest = candidate
     return smallest, report

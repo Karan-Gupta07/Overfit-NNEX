@@ -369,6 +369,51 @@ def test_gray_planes_code_with_constant_networks_when_smaller(experiment, monkey
     assert cut(b"g1", 1100, g1=(1100, 1100)) is None
 
 
+def test_gray_constants_over_screen_mix_mix_only_where_the_screen_saves(experiment, monkeypatch):
+    coder = experiment.coder
+    # 8 bytes on the 64-pixel band and over the 256-pixel image.
+    monkeypatch.setattr(experiment, "SCREEN_MIX", 0)
+    monkeypatch.setattr(experiment, "MIX_SCREEN", 1 / 8)
+    monkeypatch.setattr(experiment, "MIX_GAIN", 1 / 32)
+    monkeypatch.setattr(coder, "model_payload", lambda blob: b"model")
+    monkeypatch.setattr(
+        coder, "constant_planes", lambda payload, planes, fold: b"fold" if fold else b"zero"
+    )
+    monkeypatch.setattr(coder, "v5_layout", lambda blob: blob.decode())
+    saved, mixed = {}, []
+    monkeypatch.setattr(
+        experiment,
+        "screen_mixing",
+        lambda rgb, network, payload, values, layout: {
+            "pixels": 64,
+            "network": 1000,
+            "mixed": 1000 - saved["band"],
+        },
+    )
+
+    def encode(pixels, payload, layout, values, fits, checked=False):
+        if layout == "s16":
+            return bytes(1000 if payload == b"zero" else 1010)
+        mixed.append((payload, layout))
+        return bytes(1000 - saved["file"])
+
+    monkeypatch.setattr(coder, "encode_v5", encode)
+    rgb = np.zeros((16, 16, 3), np.uint8)
+
+    def cut(band, file):
+        saved.update(band=band, file=file)
+        mixed.clear()
+        blob, report = experiment._constant_gray(rgb, b"s16", (1, 2), None, None, 1100)
+        assert "screen" in report
+        return len(blob), [layout for _, layout in mixed]
+
+    layouts = list(experiment.mixing_layouts(rgb.shape[0] * rgb.shape[1], 0.008))
+    assert cut(8, 9) == (991, layouts)
+    assert cut(7, 50) == (1000, [])
+    assert cut(8, 8) == (1000, layouts)
+    assert all(payload == b"zero" for payload, _ in mixed)
+
+
 def test_race_continues_only_the_best_score(experiment):
     import multiprocessing
     import threading
