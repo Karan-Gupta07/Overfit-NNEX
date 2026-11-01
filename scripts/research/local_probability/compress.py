@@ -112,7 +112,10 @@ SMALL_MAX_NORM = 30.0
 RACE_FRACTION = 32
 RACE_MARGIN = 0.03
 # Mixed, weights were a quarter of PIA13779 at width 48, and width 24 won by
-# 12%; at a 32nd of training, the race had dropped it.
+# 12%; at a 32nd of training, the race had dropped it. A wider width has more
+# weights still, so it keeps training only within the margins: on 12
+# development crops and 23 LPCB images, no wider width that trailed beyond
+# them won, and training one beside the narrower width doubled its time.
 RACE_KEEP_SHARE = 0.1
 RACE_TIMEOUT = 3600.0
 # The floor waits until every worker has its features on the GPU: building them
@@ -199,9 +202,9 @@ class Race:
         """Whether to keep training: score within margin of the best, or for mixing, see below.
 
         absorbed scores the model for mixing, counting MIX_ABSORB of its bits.
-        Every width keeps training while the best absorbed score's weights are
-        at least RACE_KEEP_SHARE of it: early scores do not tell which width
-        wins once mixed there.
+        Widths narrower than the best absorbed score's keep training while its
+        weights are at least RACE_KEEP_SHARE of it: early scores do not tell
+        which width wins once mixed there.
         """
         self.scores[(hidden, feature_set)] = (score, absorbed)
         try:
@@ -209,15 +212,18 @@ class Race:
         except threading.BrokenBarrierError:
             # A worker failed or stalled: keep training rather than guess.
             return True
-        rows = list(self.scores.values())
-        if score <= min(row[0] for row in rows) * (1 + self.margin):
+        rows = dict(self.scores)
+        if score <= min(row[0] for row in rows.values()) * (1 + self.margin):
             return True
-        mixed = [row for row in rows if row[1] is not None]
+        mixed = {key: row for key, row in rows.items() if row[1] is not None}
         if absorbed is None or not mixed:
             return False
-        plain, best = min(mixed, key=lambda row: row[1])
+        lead = min(mixed, key=lambda key: mixed[key][1])
+        plain, best = mixed[lead]
+        if absorbed <= best * (1 + self.margin):
+            return True
         weights = plain - (plain - best) / (1 - MIX_ABSORB)
-        return absorbed <= best * (1 + self.margin) or weights >= RACE_KEEP_SHARE * best
+        return hidden < lead[0] and weights >= RACE_KEEP_SHARE * best
 
     def abort(self) -> None:
         self.barrier.abort()
@@ -1235,12 +1241,12 @@ def compress(
         for job, result in zip(jobs, results, strict=True):
             hidden, feature_set = job["training"]["hidden"], job["training"]["feature_set"]
             phases[f"train-h{hidden}-f{feature_set}"] = result["train_seconds"]
-            score, _absorbed = scores.get((hidden, feature_set), (None, None))
+            score, absorbed = scores.get((hidden, feature_set), (None, None))
+            raced = {} if score is None else {"race_score": round(score)}
+            if absorbed is not None:
+                raced["race_absorbed"] = round(absorbed)
             if result["dropped"]:
-                dropped.append(
-                    {"hidden": hidden, "feature_set": feature_set}
-                    | ({} if score is None else {"race_score": round(score)})
-                )
+                dropped.append({"hidden": hidden, "feature_set": feature_set} | raced)
                 continue
             phases[f"precision-h{hidden}-f{feature_set}"] = result["precision_seconds"]
             labels = {
@@ -1252,9 +1258,7 @@ def compress(
                 "training_pixels": result["training_pixels"],
                 "epochs": result["epochs"],
                 "batch": job["training"]["batch"],
-            }
-            if score is not None:
-                labels["race_score"] = round(score)
+            } | raced
             for candidate in result["choices"]["candidates"]:
                 candidates.append({**labels, **{k: v for k, v in candidate.items() if k != "file"}})
             chosen = result["choices"]["selected"]

@@ -396,10 +396,11 @@ def test_race_continues_only_the_best_score(experiment):
         for margin, want in ((0.0, [True, False, False]), (0.06, [True, True, False])):
             assert results(margin, [(100,), (105,), (120,)]) == want
         # A width also continues when it leads with the bits mixing absorbs,
-        # and every width does while the weights are a large share of that.
+        # and a narrower one does while the leader's weights are a large share of that.
         rows = [mixed(1000, 30), mixed(1040, 10), mixed(1100, 20)]
         assert results(0.0, rows) == [True, True, False]
-        assert results(0.0, [mixed(100, 30), mixed(130, 25)]) == [True, True]
+        assert results(0.0, [mixed(130, 25), mixed(100, 30)]) == [True, True]
+        assert results(0.0, [mixed(100, 30), mixed(130, 25)]) == [True, False]
         race = experiment.Race(manager, 2)
         race.abort()
         assert race.report(12, 2, 1e9)
