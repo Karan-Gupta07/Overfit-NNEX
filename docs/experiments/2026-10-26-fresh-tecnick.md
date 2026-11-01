@@ -31,6 +31,10 @@ NNEX v5, developed on LPCB and other NASA images, then ran on the cohort at
 `ea118a7`. Its crops coded 0.33% smaller (1.39% below paq8px) and its
 native images 0.04% smaller (1.79% below paq8px), but encoding took 2.4 and
 1.6 times as long ([v5 re-measure](#re-measure-with-nnex-v5-at-ea118a7)).
+`10fbde6`, a width-race change chosen on development crops and LPCB images,
+halved the crop encodes to a median 10.5 s. One crop grew by 1,095 bytes,
+which leaves the crops 0.26% smaller than at `da035fe` (1.32% below
+paq8px); the native files did not change ([width race](#width-race-at-10fbde6)).
 
 For scale: round 2's validated files on its own 24 images were 6.70% larger
 than paq8px on the crops and 2.14% larger on the native images. Those images
@@ -529,6 +533,41 @@ two mixed crops (about 1 s).
 
 All 20 files decoded exactly, and the x86_64 build decoded them to the same
 pixels and re-encoded each to identical bytes.
+
+### Width race at `10fbde6`
+
+The keep rule above made 15 of the 16 crops train both widths. `10fbde6`
+keeps a width beyond the 3% margins only if it is narrower than the width
+with the best mixed estimate
+([LPCB v5 notebook](2026-10-31-lpcb-v5.md#width-race-at-10fbde6)). The rule
+was chosen by replaying the receipts of 12 development crops, one
+development native image and 23 LPCB images, where no width it drops had
+won. It was then measured here once, with a clean tree (summary:
+[`2026-10-31-tecnick-fresh-10fbde6.json`](../results/2026-10-31-tecnick-fresh-10fbde6.json)).
+
+| | `ea118a7` | `10fbde6` |
+|---|---:|---:|
+| 16 crops, bytes | 1,518,194 | 1,519,289 (+0.07%) |
+| crops vs JPEG XL effort 10 | 29.07% smaller | 29.02% smaller |
+| crops vs paq8px -9L | 1.39% smaller (11/16) | 1.32% smaller (11/16) |
+| 4 natives, bytes | 6,401,366 | 6,401,366 |
+| encode, 512×512 | median 20.7 s (10.3 to 21.9) | median 10.5 s (10.1 to 21.6) |
+| encode, 2400×2400 | median 62.7 s (61.6 to 72.8) | median 63.8 s (60.9 to 69.5) |
+| decode, 512×512 | median 0.14 s (0.13 to 1.02) | median 0.16 s (0.13 to 1.06) |
+| decode, 2400×2400 | median 3.24 s (3.08 to 3.49) | median 3.21 s (3.07 to 3.33) |
+
+Thirteen crops now drop width 32 at the race and encode in 10.1 to 11.9 s.
+cards_b and clips, whose width 32 trailed by 2.4% and 2.1%, still train
+both widths and keep width 32 (21.6 s); garden_table had dropped it
+already. Fifteen crop files are byte-identical to those of `ea118a7`. The
+exception is guitar_head: its width 32 trailed by 3.3% at the race and
+would have finished 1,095 bytes smaller, so it is now width 12 with mixing
+(113,942 bytes, still 2.35% below paq8px, decoding in 1.06 s). Across these
+20 images and the 36 replayed, it is the only one where a width that the
+new rule drops would have won. The native images keep both widths within the
+margins, so their files and times are unchanged, still about 1.6 times
+`da035fe`'s encode time. All 20 files decoded exactly, and the x86_64 build
+decoded them to the same pixels and re-encoded each to identical bytes.
 ## Speed
 
 All timings are from one Apple M4 Pro (8 performance and 4 efficiency cores,
@@ -735,7 +774,8 @@ python $LP/verify_cross_isa.py data/probe/fresh-da035fe/*.coded \
   --out ../../../docs/results/2026-10-27-tecnick-fresh-da035fe.json)
 # NNEX v5: the same at ea118a7, saving to data/probe/fresh-ea118a7, receipts
 # local-probability-ea118a7-*, neural-cross-isa-ea118a7-tecnick-fresh.json and
-# summary docs/results/2026-10-31-tecnick-fresh-ea118a7.json
+# summary docs/results/2026-10-31-tecnick-fresh-ea118a7.json; then at 10fbde6
+# with 10fbde6 in place of ea118a7 everywhere
 # the first neural build, from its own worktree with its own backend build
 # (measure_checkout.py is newer; it imports the checkout's compress.py)
 git worktree add tmp/base-wt f53cb0f
@@ -754,13 +794,14 @@ The x86_64 backend is built as in the
 - Twenty fresh images from one studio set. Four native images cannot pin
   down how the native result varies by scene.
 - paq8px still wins 5 of the 16 fresh crops at `da035fe`, by up to 2.8%,
-  and at `ea118a7`, by up to 1.7%. Model bytes are 2.0% to 6.8% of a crop
-  file, so small images remain the weak point.
-- The fresh cohort has now been measured four times (`6c0131e`, `a82b98a`,
-  `da035fe`, `ea118a7`), its crops checked once more after a choice at `6ba3831`, and
+  and at `ea118a7` and `10fbde6`, by up to 1.7%. Model bytes are 2.0% to
+  6.8% of a crop file, so small images remain the weak point.
+- The fresh cohort has now been measured five times (`6c0131e`, `a82b98a`,
+  `da035fe`, `ea118a7`, `10fbde6`), its crops checked once more after a choice at `6ba3831`, and
   the old build `f53cb0f` run on it for comparison. No setting was chosen
   from its results, but each further look makes it slightly weaker evidence
-  than the first. The 62 LPCB camera photos
+  than the first. The `10fbde6` race rule was prompted by the `ea118a7`
+  encode times here, though chosen on other images. The 62 LPCB camera photos
   ([notes](2026-10-27-lpcb.md)) are a newer fresh test.
 - Decoding is still several times slower than JPEG XL, and the fits make it
   slower than round 2's files.

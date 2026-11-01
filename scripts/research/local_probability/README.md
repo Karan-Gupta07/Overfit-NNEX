@@ -53,12 +53,17 @@ or arithmetic-coder implementation was copied.
   smaller on the native images (4/4). All 20 files decoded exactly and
   re-encoded identically under Rosetta.
   [Durable summary](../../../docs/results/2026-10-27-tecnick-fresh-da035fe.json).
-  NNEX v5 at `ea118a7`, never tuned on these images, saved **29.07%** and
-  **23.31%** against JPEG XL effort 10 and was 1.39% (11/16) and 1.79% (4/4)
-  smaller than paq8px, 0.33% and 0.04% smaller than `da035fe`, but encoded
-  2.4 and 1.6 times slower; all 20 files again decoded exactly and
-  re-encoded identically under Rosetta.
-  [Durable summary](../../../docs/results/2026-10-31-tecnick-fresh-ea118a7.json).
+  NNEX v5 at `ea118a7`, never tuned on these images, saved 29.07% and
+  23.31% against JPEG XL effort 10 and was 0.33% and 0.04% smaller than
+  `da035fe`, but encoded 2.4 and 1.6 times slower
+  ([summary](../../../docs/results/2026-10-31-tecnick-fresh-ea118a7.json)).
+  `10fbde6` changed the width race (chosen on development crops and LPCB)
+  and halved the crop encodes; one crop grew by 1,095 bytes. It saved
+  **29.02%** and **23.31%** against JPEG XL effort 10, was 1.32% (11/16) and
+  1.79% (4/4) smaller than paq8px and 0.26% and 0.04% smaller than
+  `da035fe`, and took about 1.2 and 1.6 times as long to encode; all 20 files again
+  decoded exactly and re-encoded identically under Rosetta.
+  [Durable summary](../../../docs/results/2026-10-31-tecnick-fresh-10fbde6.json).
 - On the 107 images of the Lossless Photo Compression Benchmark (LPCB), never
   used before, commit `299bc4c` came out **1.21%** smaller in total than
   LPCB's published paq8px v216 -9L sizes (81/107 images), 3.28% smaller than
@@ -81,7 +86,8 @@ or arithmetic-coder implementation was copied.
   (paq8px still smaller on 17 of 25); every image is smaller than its best
   standard baseline. A photo took a median 52.5 s to encode and 6.2 s to
   decode; mixed files decode several times slower than the network alone.
-  All 107 files match LPCB's MD5 sums (`verify_lpcb.py`).
+  All 107 files match LPCB's MD5 sums (`verify_lpcb.py`). `10fbde6` codes
+  these images to the same files.
   [Notebook](../../../docs/experiments/2026-10-31-lpcb-v5.md),
   [durable summary](../../../docs/results/2026-10-31-lpcb-ea118a7.json).
 
@@ -154,8 +160,9 @@ for means far below the range, and searches that used it chose such roundings.)
 Parallel widths race: after a 32nd of their epochs only widths whose estimate
 (recent mean training bits plus 10-bit model bytes) is within 3% of the best
 keep training. For v5, so does a width within 3% of the best estimate that
-counts 30% of those bits, and every width does while that best estimate's
-weights make up a tenth of it; each width that finishes then mixes. The PyTorch path (`--torch-training`)
+counts 30% of those bits, and a width narrower than the one with that best
+estimate does while that model's weights make up a tenth of it; each width
+that finishes then mixes. The PyTorch path (`--torch-training`)
 instead tries weight grids labelled 16/12/10/8/7/6 bits, in that order,
 stopping after the first file that grows. Every file is independently
 verified before it is kept. Quantized tensors are entropy-coded exact binary16
@@ -224,8 +231,8 @@ Supported source files are PNG, JPEG, TIFF, WebP, and BMP. Pixel losslessness
 does not preserve original file bytes, EXIF/ICC metadata, or animation; grayscale
 and higher bit depths are not accepted. Decoding is several times slower than
 JPEG XL, and encoding trains a network per image. On an M4 Pro the fresh
-Tecnick run at `ea118a7` took a median 20.7 s to encode a 512×512 crop and
-62.7 s for a 2400×2400 image, and 0.14 s and 3.24 s to decode them. These are
+Tecnick run at `10fbde6` took a median 10.5 s to encode a 512×512 crop and
+63.8 s for a 2400×2400 image, and 0.16 s and 3.21 s to decode them. These are
 not statistically stable latency benchmarks.
 
 ## Individual model and precision experiments
@@ -307,7 +314,7 @@ crop of each (`tecnick-fresh-crop512`) and the full image of four of them
 (`tecnick-fresh-2400`). `fresh_validation.py` measures the committed default
 encoder on every image and refuses changed sources. It first ran at
 `6c0131e`; the cohort is known from then on, so later runs (`a82b98a`,
-`da035fe`, `ea118a7`) re-measure settings tuned elsewhere.
+`da035fe`, `ea118a7`, `10fbde6`) re-measure settings tuned elsewhere.
 
 `fetch_lpcb.py` downloads LPCB's original PPM archive (from the Wayback
 Machine), its MD5 list and its published per-image paq8px, cmix and GraLIC
