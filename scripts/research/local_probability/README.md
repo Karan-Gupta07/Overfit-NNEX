@@ -157,12 +157,15 @@ as a complete file, plus the best uniform-grid model when its estimate is within
 0 or 1 beyond ±16, and every value keeps one of 2^20 counts. (Training's
 objective clamps the mass of the coded range instead, which comes out negative
 for means far below the range, and searches that used it chose such roundings.)
-Parallel widths race: after a 32nd of their epochs only widths whose estimate
-(recent mean training bits plus 10-bit model bytes) is within 3% of the best
-keep training. For v5, so does a width within 3% of the best estimate that
-counts 30% of those bits, and a width narrower than the one with that best
-estimate does while that model's weights make up a tenth of it; each width
-that finishes then mixes. The PyTorch path (`--torch-training`)
+Parallel widths race: after a 32nd of their epochs (at least two) only widths
+whose estimate (recent mean training bits plus 10-bit model bytes) is within
+3% of the best keep training. For v5, so does a width within 3% of the best
+estimate that counts 30% of those bits, and a width narrower than the one with
+that best estimate does while that model's weights make up a tenth of it. The
+widths left race again after an eighth of their epochs: a width stops there if
+a wider one's estimate is lower, unless that wider model's weights make up 5%
+of its estimate counting 30% of the bits. Each width that finishes then mixes.
+The PyTorch path (`--torch-training`)
 instead tries weight grids labelled 16/12/10/8/7/6 bits, in that order,
 stopping after the first file that grows. Every file is independently
 verified before it is kept. Quantized tensors are entropy-coded exact binary16

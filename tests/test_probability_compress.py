@@ -407,7 +407,52 @@ def test_race_continues_only_the_best_score(experiment):
     finally:
         manager.shutdown()
     assert experiment.Race.checkpoint(800) == 800 // experiment.RACE_FRACTION
-    assert experiment.Race.checkpoint(3) == 1
+    assert experiment.Race.checkpoint(50) == experiment.RACE_MIN_EPOCHS
+    assert experiment.Race.checkpoint(1) == 1
+    assert experiment.Race.late_checkpoint(800) == 800 // experiment.RACE_LATE_FRACTION
+    assert experiment.Race.late_checkpoint(73) == 73 // experiment.RACE_LATE_FRACTION
+    assert experiment.Race.late_checkpoint(16) is None
+
+
+def test_late_race_stops_only_a_narrower_width_behind_a_wider_one(experiment):
+    import multiprocessing
+    import threading
+
+    manager = multiprocessing.get_context("spawn").Manager()
+
+    def mixed(stream, weights):
+        return stream + weights, stream * experiment.MIX_ABSORB + weights
+
+    def results(first, late):
+        race = experiment.Race(manager, len(first))
+        got = [None] * len(first)
+
+        def run(i, hidden):
+            kept = race.report(hidden, 4, *first[i])
+            got[i] = kept and race.report_late(hidden, 4, *late[i])
+
+        widths = [24, 48][: len(first)]
+        threads = [threading.Thread(target=run, args=item) for item in enumerate(widths)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(30)
+        return got
+
+    tied = [mixed(1000, 10), mixed(990, 20)]
+    # Weights of the wider model: 12 of its absorbed 307.5, or 30 of 322.5.
+    assert 12 / 307.5 < experiment.RACE_LATE_SHARE < 30 / 322.5
+    try:
+        assert results(tied, [mixed(1000, 10), mixed(985, 12)]) == [False, True]
+        assert results(tied, [mixed(1000, 10), mixed(975, 30)]) == [True, True]
+        # The narrower width leads, or is alone after the first race.
+        assert results(tied, [mixed(980, 10), mixed(985, 12)]) == [True, True]
+        assert results([mixed(1000, 10), mixed(1200, 20)], [mixed(1000, 10), None]) == [
+            True,
+            False,
+        ]
+    finally:
+        manager.shutdown()
 
 
 def test_floor_screen_needs_a_clear_estimate_on_a_photograph(experiment):

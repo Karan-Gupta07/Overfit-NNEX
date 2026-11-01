@@ -50,7 +50,8 @@ def shift(a, dy, dx):
     return a[yy[:, None], xx]
 
 
-def features(rgb, channel):
+def features(rgb, channel, dtype=np.float64):
+    """(rows of int16-valued features as dtype, anchor plane)."""
     a = rgb[..., channel].astype(np.int16)
     green = rgb[..., 1].astype(np.int16)
     west, north, nw = shift(a, 0, -1), shift(a, -1, 0), shift(a, -1, -1)
@@ -76,7 +77,7 @@ def features(rgb, channel):
         if channel == 2:
             rg = rgb[..., 0].astype(np.int16) - (green if TRANSFORM == "rgb" else 0)
             columns += [shift(rg, *d) for d in GUIDE]
-    return np.stack(columns, axis=-1).reshape(-1, len(columns)).astype(np.float64), anchor
+    return np.stack(columns, axis=-1).reshape(-1, len(columns)).astype(dtype, copy=False), anchor
 
 
 def blocksum(a, tile):

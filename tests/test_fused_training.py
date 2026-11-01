@@ -438,16 +438,18 @@ def test_race_checkpoint_does_not_change_training(modules):
         scores.append(trainer.race_score(fused, nets, mean_bits, 1024))
         return True
 
-    for checkpoint in (None, (2, score)):
+    for checkpoints in ((), [(2, score)], [(1, score), (3, score)]):
         nets = [net.to("mps") for net in _nets(trainer, dimensions, 8)]
         fused = FusedGroupedTrainer(nets, dimensions, x, y, a, lr=0.01)
         torch.manual_seed(11)
-        trainer._train_fused(fused, 1024, 256, 4, 0.01, "cosine", checkpoint=checkpoint)
+        trainer._train_fused(fused, 1024, 256, 4, 0.01, "cosine", checkpoints=checkpoints)
         fused.export(nets)
         finals.append(trainer._states(nets))
-    assert finals[0] == finals[1]
-    assert len(scores) == 1 and scores[0] > 0
+    assert finals[0] == finals[1] == finals[2]
+    assert len(scores) == 3 and all(score > 0 for score in scores)
     nets = [net.to("mps") for net in _nets(trainer, dimensions, 8)]
     fused = FusedGroupedTrainer(nets, dimensions, x, y, a, lr=0.01)
     with pytest.raises(trainer.Dropped):
-        trainer._train_fused(fused, 1024, 256, 4, 0.01, "cosine", checkpoint=(2, lambda _: False))
+        trainer._train_fused(
+            fused, 1024, 256, 4, 0.01, "cosine", checkpoints=[(1, score), (3, lambda _: False)]
+        )

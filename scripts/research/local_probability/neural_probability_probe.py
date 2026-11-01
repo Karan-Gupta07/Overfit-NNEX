@@ -181,7 +181,8 @@ def guide_fit(xf, target, pixels):
     for _ in range(4):
         matrix, rhs = np.zeros((k, k)), np.zeros(k)
         for start in range(0, len(xf), GUIDE_CHUNK):
-            xc, tc = xf[start : start + GUIDE_CHUNK], target[start : start + GUIDE_CHUNK]
+            xc = xf[start : start + GUIDE_CHUNK].astype(np.float64, copy=False)
+            tc = target[start : start + GUIDE_CHUNK]
             importance = 1 / np.maximum(1, np.abs(tc - xc @ co))
             matrix += xc.T @ (xc * importance[:, None])
             rhs += xc.T @ (tc * importance)
@@ -290,7 +291,11 @@ def plane_inputs(
 def _base_prediction(rgb, channel, co_base, xf, anchor):
     h, w = rgb.shape[:2]
     target = (rgb[..., channel].astype(np.int16) - anchor).ravel().astype(np.float64)
-    base_raw = xf @ co_base
+    # Integer features times binary16 weights add up exactly, so chunks change no bit.
+    base_raw = np.empty(len(xf))
+    for start in range(0, len(xf), GUIDE_CHUNK):
+        rows = slice(start, start + GUIDE_CHUNK)
+        np.matmul(xf[rows].astype(np.float64, copy=False), co_base, out=base_raw[rows])
     base_prediction = np.clip(np.floor(base_raw + anchor.ravel() + 0.5), 0, 255)
     base_error = (
         (rgb[..., channel].astype(np.int16).ravel() - base_prediction)
@@ -420,7 +425,9 @@ def plane_bases(rgb, channel, tiles):
     bases = []
     for ys, xs, mask in tiles:
         crop = rgb[ys, xs]
-        xf, anchor = linear.features(crop, channel)
+        # int16, not float64: at 2400 by 2400 the three planes' rows otherwise take
+        # 3 GB per worker, which pushed two parallel workers into memory compression.
+        xf, anchor = linear.features(crop, channel, np.int16)
         target = (crop[..., channel].astype(np.int16) - anchor).ravel().astype(np.float64)
         keep = slice(None) if mask is None else mask.ravel()
         bases.append((crop, xf, anchor, target, keep, (ys.start or 0, xs.start or 0)))
@@ -757,36 +764,38 @@ class Dropped(Exception):
     """A width race stopped this model's training early."""
 
 
-def _train_fused(fused, count, batch, epochs, lr, schedule, bits=None, checkpoint=None, prune=None):
-    """checkpoint: (epoch, callback); a callback returning False raises Dropped.
+def _train_fused(fused, count, batch, epochs, lr, schedule, bits=None, checkpoints=(), prune=None):
+    """checkpoints: (epoch, callback) pairs; a callback returning False raises Dropped.
 
-    The callback gets each plane's mean training bits per sample over the last
-    eighth (at least one) of the epochs before the checkpoint. prune(epoch), if
+    Each callback gets each plane's mean training bits per sample over the last
+    eighth (at least one) of the epochs before its checkpoint. prune(epoch), if
     given, runs before every epoch and consumes no random numbers.
     """
     factor = learning_rate_factor(schedule, epochs * math.ceil(count / batch))
     step = 0
-    seen, samples = None, 0
-    window = 0 if checkpoint is None else max(1, checkpoint[0] // 8)
+    seen, samples = [None] * len(checkpoints), [0] * len(checkpoints)
+    windows = [max(1, at // 8) for at, _ in checkpoints]
     for epoch in range(epochs):
         if prune is not None:
             prune(epoch)
-        averaging = window and 1 <= checkpoint[0] - epoch <= window
+        averaging = [i for i, (at, _) in enumerate(checkpoints) if 1 <= at - epoch <= windows[i]]
         order = torch.randperm(count, device=fused.x.device).to(torch.int32)
         for indices in order.split(batch):
             lost = fused.step(indices, lr * factor(step), bits=bits)
             if averaging:
                 # Before the next step reuses the bits buffer: the queue is in order.
-                seen = lost.sum(1) if seen is None else seen + lost.sum(1)
-                samples += lost.shape[1]
+                total = lost.sum(1)
+                for i in averaging:
+                    seen[i] = total if seen[i] is None else seen[i] + total
+                    samples[i] += lost.shape[1]
             step += 1
         if not torch.isfinite(lost).all():
             raise ValueError("non-finite training objective")
         if epoch % 10 == 9:
             print(f"epoch {epoch + 1}: {lost.mean(1).cpu().tolist()} batch bits", flush=True)
-        at_checkpoint = checkpoint is not None and epoch + 1 == checkpoint[0]
-        if at_checkpoint and not checkpoint[1]((seen / samples).cpu().tolist()):
-            raise Dropped
+        for i, (at, callback) in enumerate(checkpoints):
+            if epoch + 1 == at and not callback((seen[i] / samples[i]).cpu().tolist()):
+                raise Dropped
 
 
 def _states(nets):
@@ -913,10 +922,11 @@ def _fit_fused(args, x, y, a, nets, dimensions, planes, prior, count, mark, extr
     model (one chain through args.qat_bits) and model_search picks each
     plane's weights by estimated size. With args.race, training reports its
     race_score at args.race.checkpoint(epochs) and stops (Dropped) unless
-    args.race.report says to continue; the report consumes no random numbers,
-    so a model that continues is the one trained without a race. With
-    args.estimate, the score also goes to args.estimate, at the race's
-    checkpoint or else at epoch args.estimate_at.
+    args.race.report says to continue, and with args.mixing_absorb again at
+    args.race.late_checkpoint(epochs) (args.race.report_late); reports consume
+    no random numbers, so a model that continues is the one trained without a
+    race. With args.estimate, the score also goes to args.estimate, at the
+    race's first checkpoint or else at epoch args.estimate_at.
     """
     fused = metal_training.FusedGroupedTrainer(
         nets, dimensions, x, y, a, args.lr, getattr(args, "max_norm", 10.0)
@@ -924,7 +934,7 @@ def _fit_fused(args, x, y, a, nets, dimensions, planes, prior, count, mark, extr
     schedule = getattr(args, "schedule", "constant")
     race = getattr(args, "race", None)
     estimate = getattr(args, "estimate", None)
-    checkpoint = None
+    checkpoints = []
     if race is not None or estimate is not None:
 
         def report(mean_bits):
@@ -938,7 +948,16 @@ def _fit_fused(args, x, y, a, nets, dimensions, planes, prior, count, mark, extr
             return race.report(args.hidden, getattr(args, "feature_set", 0), score, absorbed)
 
         at = race.checkpoint(args.epochs) if race is not None else args.estimate_at
-        checkpoint = (at, report)
+        checkpoints.append((at, report))
+    absorb = getattr(args, "mixing_absorb", None)
+    late = None if race is None or absorb is None else race.late_checkpoint(args.epochs)
+    if late is not None:
+
+        def report_late(mean_bits):
+            score, absorbed = race_score(fused, nets, mean_bits, extras["pixels"], absorb)
+            return race.report_late(args.hidden, getattr(args, "feature_set", 0), score, absorbed)
+
+        checkpoints.append((late, report_late))
     pruner = Pruner(fused, args.epochs, extras["pixels"]) if getattr(args, "prune", False) else None
     _train_fused(
         fused,
@@ -947,7 +966,7 @@ def _fit_fused(args, x, y, a, nets, dimensions, planes, prior, count, mark, extr
         args.epochs,
         args.lr,
         schedule,
-        checkpoint=checkpoint,
+        checkpoints=checkpoints,
         prune=pruner,
     )
     if pruner is not None:

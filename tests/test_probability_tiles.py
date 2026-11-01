@@ -98,3 +98,29 @@ def test_banded_features_equal_unbanded_features(trainer, monkeypatch, feature_s
             prior[banded][channel] = outputs[banded][5]
         for unbanded, banded in zip(outputs[False][:5], outputs[True][:5], strict=True):
             assert np.array_equal(unbanded, banded)
+
+
+@pytest.mark.parametrize("feature_set", [0, 4])
+def test_training_features_equal_exact_float_features(trainer, monkeypatch, feature_set):
+    """Integer base features, predicted in chunks, give plane_inputs' float64 features."""
+    monkeypatch.setattr(trainer.coder, "local_fits", fake_local_fits)
+    monkeypatch.setattr(trainer, "GUIDE_CHUNK", 1000)
+    rng = np.random.default_rng(7)
+    rgb = np.clip(np.cumsum(rng.integers(-4, 5, (70, 90, 3)), axis=1) + 128, 0, 255)
+    rgb = rgb.astype(np.uint8)
+    args = argparse.Namespace(causal_context=True, feature_set=feature_set)
+    whole = [(slice(0, 70), slice(0, 90), None)]
+    prior, prior_exact = {}, {}
+    for channel in (1, 0, 2):
+        xf, target, anchor, _, co_base, errors = trainer.tile_inputs(
+            rgb, channel, args, prior, whole
+        )
+        exact, exact_target, exact_anchor, base_error = trainer.plane_inputs(
+            rgb, channel, co_base, prior_exact, True, feature_set=feature_set
+        )
+        assert np.array_equal(xf, (exact / 32).astype(np.float32))
+        assert np.array_equal(target, exact_target)
+        assert np.array_equal(anchor, exact_anchor.ravel())
+        assert np.array_equal(errors[0], base_error)
+        prior[channel] = errors
+        prior_exact[channel] = base_error

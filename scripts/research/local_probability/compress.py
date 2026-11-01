@@ -117,6 +117,21 @@ RACE_MARGIN = 0.03
 # development crops and 23 LPCB images, no wider width that trailed beyond
 # them won, and training one beside the narrower width doubled its time.
 RACE_KEEP_SHARE = 0.1
+# The race waits at least RACE_MIN_EPOCHS: over about 6.5 MP a 32nd of training
+# is the first epoch, whose mean bits rank widths at random. There, width 24
+# trailed width 48 by 6.9% on PIA13943, led by 2.8% after the second epoch and
+# won by 0.5%.
+RACE_MIN_EPOCHS = 2
+# With mixing (v5), widths left after the race meet again after
+# 1/RACE_LATE_FRACTION of their epochs, and a width stops if a wider one's
+# score is lower there, unless that wider model's weights are at least
+# RACE_LATE_SHARE of its absorbed score. On 12 development crops, 12 development
+# natives trained at widths 24 and 48, and 26 LPCB images, no width it stopped
+# would have won: the wider one gained to the end on every native, whose
+# weights were 1.7% to 4.2% at width 48. A narrower width that trailed there won
+# on STA13782 (6.6%) and, mixed, on STA13781 (8.1%).
+RACE_LATE_FRACTION = 8
+RACE_LATE_SHARE = 0.05
 RACE_TIMEOUT = 3600.0
 # The floor waits until every worker has its features on the GPU: building them
 # is CPU-bound, while the floor has all of training to finish beside it.
@@ -190,11 +205,21 @@ class Race:
     def __init__(self, manager, count: int, margin: float = RACE_MARGIN):
         self.scores = manager.dict()
         self.barrier = manager.Barrier(count)
+        # The widths left after the race, as each worker works them out from the
+        # same scores, meet again at the barrier for that many.
+        self.late_scores = manager.dict()
+        self.late_barriers = [manager.Barrier(n) for n in range(2, count + 1)]
         self.margin = margin
+        self.survivors = None
 
     @staticmethod
     def checkpoint(epochs: int) -> int:
-        return max(1, epochs // RACE_FRACTION)
+        return min(epochs, max(RACE_MIN_EPOCHS, epochs // RACE_FRACTION))
+
+    @staticmethod
+    def late_checkpoint(epochs: int) -> int | None:
+        at = epochs // RACE_LATE_FRACTION
+        return at if Race.checkpoint(epochs) < at < epochs else None
 
     def report(
         self, hidden: int, feature_set: int, score: float, absorbed: float | None = None
@@ -213,20 +238,42 @@ class Race:
             # A worker failed or stalled: keep training rather than guess.
             return True
         rows = dict(self.scores)
+        self.survivors = [key for key in rows if self._continues(rows, key)]
+        return (hidden, feature_set) in self.survivors
+
+    def _continues(self, rows: dict, key: tuple[int, int]) -> bool:
+        score, absorbed = rows[key]
         if score <= min(row[0] for row in rows.values()) * (1 + self.margin):
             return True
-        mixed = {key: row for key, row in rows.items() if row[1] is not None}
+        mixed = {other: row for other, row in rows.items() if row[1] is not None}
         if absorbed is None or not mixed:
             return False
-        lead = min(mixed, key=lambda key: mixed[key][1])
+        lead = min(mixed, key=lambda other: mixed[other][1])
         plain, best = mixed[lead]
         if absorbed <= best * (1 + self.margin):
             return True
         weights = plain - (plain - best) / (1 - MIX_ABSORB)
-        return hidden < lead[0] and weights >= RACE_KEEP_SHARE * best
+        return key[0] < lead[0] and weights >= RACE_KEEP_SHARE * best
+
+    def report_late(self, hidden: int, feature_set: int, score: float, absorbed: float) -> bool:
+        """Whether to keep training after the second race (see RACE_LATE_SHARE)."""
+        if self.survivors is None or len(self.survivors) < 2:
+            return True
+        self.late_scores[(hidden, feature_set)] = (score, absorbed)
+        try:
+            self.late_barriers[len(self.survivors) - 2].wait(RACE_TIMEOUT)
+        except threading.BrokenBarrierError:
+            return True
+        for (wider, _), (plain, best) in dict(self.late_scores).items():
+            weights = plain - (plain - best) / (1 - MIX_ABSORB)
+            if wider > hidden and plain < score and weights < RACE_LATE_SHARE * best:
+                return False
+        return True
 
     def abort(self) -> None:
         self.barrier.abort()
+        for barrier in self.late_barriers:
+            barrier.abort()
 
 
 def fast_floor(rgba: np.ndarray) -> bytes:
@@ -1232,6 +1279,7 @@ def compress(
                 phases["floor"] = phases.get("floor", 0.0) + time.perf_counter() - mark
             results = [item.get() for item in pending] if pool else [learn(job) for job in jobs]
             scores = dict(rendezvous.scores) if manager is not None else {}
+            late_scores = dict(rendezvous.late_scores) if manager is not None else {}
         finally:
             if pool is not None:
                 pool.terminate()
@@ -1245,6 +1293,9 @@ def compress(
             raced = {} if score is None else {"race_score": round(score)}
             if absorbed is not None:
                 raced["race_absorbed"] = round(absorbed)
+            if (hidden, feature_set) in late_scores:
+                late, late_absorbed = late_scores[(hidden, feature_set)]
+                raced |= {"late_score": round(late), "late_absorbed": round(late_absorbed)}
             if result["dropped"]:
                 dropped.append({"hidden": hidden, "feature_set": feature_set} | raced)
                 continue
