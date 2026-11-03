@@ -450,6 +450,26 @@ def check_strips(blob: bytes, rgba: np.ndarray) -> int:
 
 
 def _memory() -> int:
+    if os.name == "nt":
+        import ctypes
+
+        class Status(ctypes.Structure):
+            _fields_ = [
+                ("length", ctypes.c_uint32),
+                ("load", ctypes.c_uint32),
+                ("total", ctypes.c_uint64),
+                ("available", ctypes.c_uint64),
+                ("page_total", ctypes.c_uint64),
+                ("page_available", ctypes.c_uint64),
+                ("virtual_total", ctypes.c_uint64),
+                ("virtual_available", ctypes.c_uint64),
+                ("extended_available", ctypes.c_uint64),
+            ]
+
+        status = Status(length=ctypes.sizeof(Status))
+        if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):  # type: ignore[attr-defined]
+            raise OSError("GlobalMemoryStatusEx failed")
+        return int(status.total)
     return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
 
 

@@ -14,7 +14,6 @@ import argparse
 import hashlib
 import json
 import os
-import resource
 import subprocess
 import time
 from pathlib import Path
@@ -32,6 +31,17 @@ def git(*args: str) -> str:
     return subprocess.run(
         ["git", "-C", str(ROOT), *args], capture_output=True, text=True, check=True
     ).stdout.strip()
+
+
+def children_maxrss_mb() -> float | None:
+    """Peak resident memory of the largest finished child, or None on Windows."""
+    if os.name == "nt":
+        return None
+    import resource
+    import sys
+
+    peak = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
+    return peak / 2**20 if sys.platform == "darwin" else peak / 2**10
 
 
 def main() -> None:
@@ -77,7 +87,7 @@ def main() -> None:
         start = time.perf_counter()
         decoded = experiment.decompress(blob)
         decode_seconds = time.perf_counter() - start
-        peak = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss / 2**20
+        peak = children_maxrss_mb()
         if not np.array_equal(np.asarray(decoded)[..., :3], pixels[..., :3]):
             raise AssertionError(f"decode mismatch: {path.name}")
         if args.files:
