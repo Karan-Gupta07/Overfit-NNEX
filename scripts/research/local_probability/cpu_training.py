@@ -1,4 +1,4 @@
-"""The fused trainer's step and evaluation on the CPU, in plain PyTorch.
+"""The fused trainer's step and evaluation in plain PyTorch, for the CPU or a CUDA GPU.
 
 TorchGroupedTrainer keeps FusedGroupedTrainer's parameter blocks, its Adam
 with per-plane clipping, its pruning mask and its post-training grid, so the

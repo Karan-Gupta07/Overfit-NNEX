@@ -244,3 +244,27 @@ def test_cpu_training_follows_the_metal_trainer(modules):
     assert np.allclose(
         evaluator.bits([0, 1, 2], blocks), reference.bits([0, 1, 2], blocks), rtol=1e-5
     )
+
+
+def test_torch_trainer_on_cuda_follows_the_cpu(modules):
+    import torch
+
+    if not torch.cuda.is_available():
+        pytest.skip("comparison needs a CUDA or ROCm GPU")
+    trainer, _search, cpu = modules
+    x, y, a = _data(2048)
+    gpu = _cpu(trainer, cpu, [n.cuda() for n in _nets(trainer, 12)], x.cuda(), y.cuda(), a.cuda())
+    fused = _cpu(trainer, cpu, _nets(trainer, 12), x, y, a)
+    generator = torch.Generator().manual_seed(9)
+    for _ in range(20):
+        index = torch.randperm(2048, generator=generator)[:512].to(torch.int32)
+        want = fused.step(index, 0.01)
+        got = gpu.step(index.cuda(), 0.01).cpu()
+    assert torch.allclose(got, want, rtol=1e-3, atol=1e-3)
+    assert float((gpu.params.cpu() - fused.params).norm() / fused.params.norm()) < 1e-4
+    blocks = np.stack([fused.params[g].numpy() for g in range(3)])
+    evaluator = cpu.TorchEvaluator(x, y, a, 12, 4, DIMENSIONS, loss=trainer.coded_bits)
+    on_gpu = cpu.TorchEvaluator(
+        x.cuda(), y.cuda(), a.cuda(), 12, 4, DIMENSIONS, loss=trainer.coded_bits
+    )
+    assert np.allclose(on_gpu.bits([0, 1, 2], blocks), evaluator.bits([0, 1, 2], blocks), rtol=1e-5)

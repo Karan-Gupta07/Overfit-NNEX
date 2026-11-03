@@ -1139,7 +1139,7 @@ def compress(
     as the serial loop does, so the files are byte-identical either way.
     compile_training=True is faster on MPS but trains (slightly) different models.
     fused_training=None uses the fused trainer (on Metal when MPS is available,
-    else its PyTorch copy on the CPU);
+    else its PyTorch copy on a CUDA GPU or the CPU);
     search=None then adds quantization-aware snapshots and an estimated
     per-plane weight search, coding only two finalists. widths=None picks
     default_widths for the image. Unless race=False, parallel fused
@@ -1161,7 +1161,7 @@ def compress(
         or type(lr) is not float
         or not math.isfinite(lr)
         or lr <= 0
-        or device not in ("auto", "cpu", "mps")
+        or device not in ("auto", "cpu", "mps", "cuda")
         or envelope not in (3, 4, 5)
         or type(parallel) is not bool
         or type(compile_training) is not bool
@@ -1462,7 +1462,7 @@ def main() -> None:
     parser.add_argument("--mixtures", type=int, default=4)
     parser.add_argument("--schedule", choices=["constant", "cosine"], default="cosine")
     parser.add_argument("--lr", type=float, default=0.015)
-    parser.add_argument("--device", choices=["auto", "cpu", "mps"], default="auto")
+    parser.add_argument("--device", choices=["auto", "cpu", "mps", "cuda"], default="auto")
     parser.add_argument("--no-hybrid", action="store_true")
     parser.add_argument("--without-floor", action="store_true")
     parser.add_argument("--floor-only", action="store_true")

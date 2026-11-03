@@ -92,7 +92,7 @@ def main() -> None:
     parser.add_argument("--config", choices=sorted(CONFIGS), required=True)
     parser.add_argument("--work", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
-    parser.add_argument("--device", choices=["auto", "cpu", "mps"], default="auto")
+    parser.add_argument("--device", choices=["auto", "cpu", "mps", "cuda"], default="auto")
     parser.add_argument("--sequential", action="store_true", help="historical per-plane loop")
     args = parser.parse_args()
     torch.set_num_threads(4)

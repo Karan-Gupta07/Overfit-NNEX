@@ -758,9 +758,9 @@ def fit_planes(rgb, args, device, tiles, extras=None):
 
 
 def fused_supported(device, dimensions, args):
-    """The fused trainer runs on Metal, and its PyTorch copy (cpu_training) on the CPU."""
+    """The fused trainer runs on Metal, and its PyTorch copy (cpu_training) elsewhere."""
     supported = metal_training.supported(max(dimensions), args.hidden, args.mixtures)
-    return device in ("mps", "cpu") and supported
+    return device in ("mps", "cpu", "cuda") and supported
 
 
 def grouped_trainer(nets, dimensions, x, y, a, lr, max_norm=10.0):
@@ -1024,13 +1024,20 @@ def _fit_fused(args, x, y, a, nets, dimensions, planes, prior, count, mark, extr
     return results, prior
 
 
+def resolve_device(name: str) -> str:
+    """auto: Metal, else a CUDA GPU (NVIDIA, or AMD under ROCm), else the CPU."""
+    if name != "auto":
+        return name
+    if torch.backends.mps.is_available():
+        return "mps"
+    return "cuda" if torch.cuda.is_available() else "cpu"
+
+
 def run(path, args):
     start = time.perf_counter()
     torch.manual_seed(getattr(args, "seed", 20261023))
     rgb = read_rgb(path, max_pixels=coder.MAX_PIXELS)
-    device = "mps" if args.device == "auto" and torch.backends.mps.is_available() else args.device
-    if device == "auto":
-        device = "cpu"
+    device = resolve_device(args.device)
     baseline = None
     if getattr(args, "baseline", True):
         baseline = imagecodecs.jpegxl_encode(rgb, lossless=True, effort=9, numthreads=1)
@@ -1138,7 +1145,7 @@ if __name__ == "__main__":
     parser.add_argument("--batch", type=int, default=8192)
     parser.add_argument("--lr", type=float, default=0.001)
     parser.add_argument("--schedule", choices=["constant", "cosine"], default="constant")
-    parser.add_argument("--device", choices=["auto", "cpu", "mps"], default="auto")
+    parser.add_argument("--device", choices=["auto", "cpu", "mps", "cuda"], default="auto")
     parser.add_argument("--causal-context", action="store_true")
     parser.add_argument("--feature-set", type=int, choices=[0, 1], default=0)
     parser.add_argument("--sequential", action="store_true", help="historical per-plane loop")
