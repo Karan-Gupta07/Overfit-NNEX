@@ -135,9 +135,11 @@ v5 is smaller than JPEG XL effort 10 on all 107 images and smaller than
 paq8px on all 62 photos and all 20 star fields. paq8px still wins 17 of the
 25 other NASA images (renders, composites, processed views), mostly small
 ones where our stored weights are most of the difference; over those 25 ours
-is 0.22% smaller in total, against 22.7% larger for v4. The v4 files are in
-the [`lpcb-2db19a3` release](https://github.com/Karan-Gupta07/Overfit-NNEX/releases/tag/lpcb-2db19a3)
-with a script that checks them against LPCB's MD5 sums. See the
+is 0.22% smaller in total, against 22.7% larger for v4. The v5 files are in
+the [`lpcb-2063b53` release](https://github.com/Karan-Gupta07/Overfit-NNEX/releases/tag/lpcb-2063b53)
+and the v4 files in the
+[`lpcb-2db19a3` release](https://github.com/Karan-Gupta07/Overfit-NNEX/releases/tag/lpcb-2db19a3),
+each with a script that checks them against LPCB's MD5 sums. See the
 [v5 notebook](docs/experiments/2026-10-31-lpcb-v5.md) and the
 [v4 notebook](docs/experiments/2026-10-27-lpcb.md).
 
