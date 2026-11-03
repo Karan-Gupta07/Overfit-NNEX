@@ -268,3 +268,32 @@ def test_torch_trainer_on_cuda_follows_the_cpu(modules):
         x.cuda(), y.cuda(), a.cuda(), 12, 4, DIMENSIONS, loss=trainer.coded_bits
     )
     assert np.allclose(on_gpu.bits([0, 1, 2], blocks), evaluator.bits([0, 1, 2], blocks), rtol=1e-5)
+
+
+def test_cuda_graph_steps_match_eager_steps(modules):
+    import torch
+
+    if not torch.cuda.is_available():
+        pytest.skip("needs a CUDA or ROCm GPU")
+    trainer, _search, cpu = modules
+    x, y, a = (t.cuda() for t in _data(2048))
+    runs = []
+    for graphs in (False, True):
+        fused = _cpu(trainer, cpu, [n.cuda() for n in _nets(trainer, 12)], x, y, a)
+        fused.graphs = graphs
+        generator = torch.Generator().manual_seed(9)
+        lost = []
+        for i in range(40):
+            if i == 15:
+                fused.prune([[3], [5, 7], []])
+            if i == 25:
+                saved = fused.state()
+            size = 300 if i % 9 == 8 else 512
+            index = torch.randperm(2048, generator=generator)[:size].to(torch.int32).cuda()
+            lost.append(fused.step(index, 0.01, bits=12 if i >= 30 else None).cpu())
+        fused.restore(saved)
+        index = torch.arange(512, dtype=torch.int32, device="cuda")
+        lost.append(fused.step(index, 0.01).cpu())
+        runs.append((fused.params.cpu(), lost))
+    assert torch.equal(runs[0][0], runs[1][0])
+    assert all(torch.equal(p, q) for p, q in zip(runs[0][1], runs[1][1], strict=True))

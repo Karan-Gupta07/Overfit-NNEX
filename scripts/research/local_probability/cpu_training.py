@@ -27,8 +27,20 @@ class TorchGroupedTrainer(metal_training.FusedGroupedTrainer):
     about twice as long on the CPU.
     """
 
+    # On CUDA each (batch, bits) step is captured once as a CUDA graph and
+    # replayed: the step is a few dozen small kernels, and launching them one by
+    # one from Python took about ten times as long as running them.
+    graphs = True
+
     def __init__(self, nets, dimensions, x, y, a, lr: float, max_norm: float = 10.0):
         super().__init__(nets, dimensions, x, y, a, lr, max_norm, half_scratch=False)
+        self._cuda = self.x.device.type == "cuda"
+        if self._cuda:
+            # Adam's step size and bias correction live on the device so that a
+            # captured step reads each step's values.
+            self._scale = torch.zeros((), device=self.x.device)
+            self._root = torch.zeros((), device=self.x.device)
+            self._graphs: dict = {}
 
     def _compile(self):
         return None
@@ -125,20 +137,51 @@ class TorchGroupedTrainer(metal_training.FusedGroupedTrainer):
 
     def step(self, index: torch.Tensor, lr: float, bits: int | None = None):
         """One Adam step; with `bits`, a straight-through quantization-aware step."""
-        forward = self.params if bits is None else self.quantized(bits)
-        grads, lost = self._gradients(index, forward)
         self.steps += 1
         bc1 = 1 - 0.9**self.steps
         bc2 = 1 - 0.999**self.steps
-        with torch.no_grad():
-            # Pruned weights stay zero; their gradients still count in the clipping norm.
-            norm = grads.square().sum(1, keepdim=True).sqrt()
-            grads.mul_((self.max_norm / (norm + 1e-6)).clamp(max=1.0))
-            live = self.keep != 0
-            self.m.copy_(torch.where(live, 0.9 * self.m + 0.1 * grads, self.m))
-            self.v.copy_(torch.where(live, 0.999 * self.v + 0.001 * grads * grads, self.v))
-            update = (lr / bc1) * self.m / (self.v.sqrt() / math.sqrt(bc2) + 1e-8)
-            self.params.sub_(torch.where(live, update, 0.0))
+        if not self._cuda:
+            return self._update(index, bits, lr / bc1, math.sqrt(bc2))
+        self._scale.fill_(lr / bc1)
+        self._root.fill_(math.sqrt(bc2))
+        if not self.graphs:
+            return self._update(index, bits, self._scale, self._root)
+        key = (index.numel(), bits)
+        entry = self._graphs.get(key)
+        if entry is None:
+            # The first step of each shape runs eagerly on a side stream, as
+            # capture requires, and the second is captured.
+            self._graphs[key] = "warm"
+            stream = torch.cuda.Stream(self.x.device)
+            stream.wait_stream(torch.cuda.current_stream(self.x.device))
+            with torch.cuda.stream(stream):
+                lost = self._update(index, bits, self._scale, self._root)
+            torch.cuda.current_stream(self.x.device).wait_stream(stream)
+            return lost
+        if entry == "warm":
+            static = index.clone()
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph):
+                lost = self._update(static, bits, self._scale, self._root)
+            self._graphs[key] = entry = (graph, static, lost)
+        graph, static, lost = entry
+        static.copy_(index)
+        graph.replay()
+        # Overwritten by the next replay of this shape, like the Metal trainer's bits buffer.
+        return lost
+
+    @torch.no_grad()
+    def _update(self, index: torch.Tensor, bits: int | None, scale, root):
+        forward = self.params if bits is None else self.quantized(bits)
+        grads, lost = self._gradients(index, forward)
+        # Pruned weights stay zero; their gradients still count in the clipping norm.
+        norm = grads.square().sum(1, keepdim=True).sqrt()
+        grads.mul_((self.max_norm / (norm + 1e-6)).clamp(max=1.0))
+        live = self.keep != 0
+        self.m.copy_(torch.where(live, 0.9 * self.m + 0.1 * grads, self.m))
+        self.v.copy_(torch.where(live, 0.999 * self.v + 0.001 * grads * grads, self.v))
+        update = scale * self.m / (self.v.sqrt() / root + 1e-8)
+        self.params.sub_(torch.where(live, update, 0.0))
         return lost
 
 

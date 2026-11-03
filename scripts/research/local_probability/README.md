@@ -336,28 +336,37 @@ jobs. Peak memory is summed over the encoder's process tree.
 
 ### On an NVIDIA GPU
 
-Measured at `5d9139d` plus the commit that adds `--device cuda`, on a Modal
-container: NVIDIA L4 (24 GB), 8 CPU cores, 32 GB, Linux, PyTorch 2.13.0 with
-CUDA 13.0. The crops used `--device cuda`; the photo used `--device auto`,
-which picked the GPU.
+Measured at `659349a` plus the commit that captures the CUDA step as a graph,
+on a Modal container: NVIDIA L4 (24 GB), 8 CPU cores, 32 GB, Linux, PyTorch
+2.13.0 with CUDA 13.0. The crops used `--device cuda`; the photo used
+`--device auto`, which picked the GPU.
 
 | image | CUDA file | Metal file | CUDA vs Metal | encode, CUDA / M4 CPU / Metal | GPU memory |
 |---|---:|---:|---:|---:|---:|
-| apples crop | 88,421 B | 88,438 B | −0.02% | 197 s / 290 s / 12 s | 1.2 GB |
-| flowers crop | 89,321 B | 89,288 B | +0.04% | 202 s / 252 s / 11 s | 1.2 GB |
-| screws crop | 140,210 B | 140,482 B | −0.19% | 228 s / 344 s / 24 s | 1.7 GB |
-| `canon_eos_1100d_01` | 8,294,999 B | 8,301,756 B | −0.08% | 300 s / – / 47.3 s | 5.9 GB |
+| apples crop | 88,395 B | 88,438 B | −0.05% | 109 s / 290 s / 12 s | 1.4 GB |
+| flowers crop | 89,351 B | 89,288 B | +0.07% | 110 s / 252 s / 11 s | 1.4 GB |
+| screws crop | 140,328 B | 140,482 B | −0.11% | 213 s / 344 s / 24 s | 2.0 GB |
+| `canon_eos_1100d_01` | 8,301,209 B | 8,301,756 B | −0.01% | 256 s / – / 47.3 s | 6.0 GB |
 
 Every file decoded exactly, kept the network alone and kept Metal's width
-(12, 12, 32 and 48). The L4 is only somewhat faster than the CPU on crops: a
-width-12 step at batch 4096 takes roughly 3 to 4 ms, about as long as on the
-M4 Pro's CPU, against 0.13 ms in the fused Metal kernels. The step is a few
-dozen small GPU operations, so launch and Python overhead dominate, and the
-GPU was about half busy.
+(12, 12, 32 and 48). On CUDA, `cpu_training.py` captures each step shape as a
+CUDA graph and replays it, which gives the same parameters as running the
+step's kernels one by one (a test checks this) and halved the crops' encode
+times (197 to 202 s before; screws, which trains two widths side by side,
+went from 228 s to 213 s, and the photo from 300 s to 256 s). Steps on
+random data:
 
+| step | one by one | graph | fused Metal |
+|---|---:|---:|---:|
+| width 12, batch 4096 | 2.96 ms | 1.47 ms | about 0.13 ms |
+| width 48, batch 8192 | 3.06 ms | 2.89 ms | about 0.6 ms |
+
+The width-48 step was already limited by the GPU's own work, not by
+launches: PyTorch runs it as dozens of separate kernels that each read and
+write whole intermediate tensors, where the Metal kernels fuse them.
 ### Limits
 
-- About 20 times slower to encode than Metal on the M4 Pro's CPU, and 6 to 18
+- About 20 times slower to encode than Metal on the M4 Pro's CPU, and 5 to 10
   times slower on the L4 GPU. Most of the time is the training step. A full
   LPCB run on a 4-core CPU would take days; none has been run.
 - A few images on a few machines, not a stable latency benchmark. AMD (ROCm),

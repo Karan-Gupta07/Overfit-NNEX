@@ -250,8 +250,8 @@ formats and limits are in the
   per 2400×2400 image or 10 to 16 Mpx photo on an M4 Pro), and
   decoding is slower than JPEG XL. `--device cpu` and `--device cuda`
   (NVIDIA) encode without Metal with the same settings, but much more slowly:
-  247 to 344 s per 512×512 crop on the M4 Pro's CPU, 197 to 228 s on an
-  NVIDIA L4, and 5 to 36 minutes for an LPCB photo on an L4 or 4-core CPUs,
+  247 to 344 s per 512×512 crop on the M4 Pro's CPU, 109 to 213 s on an
+  NVIDIA L4, and 4 to 36 minutes for an LPCB photo on an L4 or 4-core CPUs,
   with files within 0.4% of Metal's
   ([Encoding without Metal](scripts/research/local_probability/README.md#encoding-without-metal)).
   The released LPCB files decode exactly on macOS, Linux and Windows. Files
