@@ -2,9 +2,8 @@
 # decoding the released LPCB files against LPCB's MD5 sums, and CPU encodes.
 name: cpu-portability
 
+# About two hours of runner time, so it runs only on demand.
 on:
-  push:
-    branches: [cpu-encoder]
   workflow_dispatch:
 
 env:
