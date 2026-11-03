@@ -1,0 +1,131 @@
+# Checks the CPU-only path on x86_64 Linux and Windows: install, backend build,
+# decoding the released LPCB files against LPCB's MD5 sums, and CPU encodes.
+name: cpu-portability
+
+on:
+  push:
+    branches: [cpu-encoder]
+  workflow_dispatch:
+
+env:
+  RELEASE: lpcb-2063b53
+  PHOTO: canon_eos_1100d_01
+
+jobs:
+  decode:
+    name: decode LPCB (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 360
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install the decoder as the release notes say
+        run: |
+          python -m pip install ".[hybrid]"
+          c++ --version
+          mkdir -p data/research-local-probability
+          c++ -O3 -std=c++17 -pthread scripts/research/local_probability/nnproto_integer.cpp \
+            -o data/research-local-probability/nnproto-integer
+          ls -la data/research-local-probability
+      - name: Download the released files and LPCB's MD5 sums
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "$RELEASE" --repo "$GITHUB_REPOSITORY" --dir release
+          cd release
+          sha256sum -c "lpcb-coded-$RELEASE.tar.sha256"
+          tar -xf "lpcb-coded-$RELEASE.tar"
+          (cd lpcb-coded && sha256sum -c SHA256SUMS > /dev/null && echo "107 file checksums ok")
+          curl -fsSL -o md5sums.txt http://qlic.altervista.org/md5sums.txt
+      - name: Decode all 107 and compare with LPCB's MD5 sums
+        run: |
+          python scripts/research/local_probability/verify_lpcb.py release/lpcb-coded \
+            --md5sums release/md5sums.txt --out decode-report.json 2>&1 | tee decode.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: decode-${{ matrix.os }}
+          path: |
+            decode-report.json
+            decode.log
+
+  encode:
+    name: CPU encode (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 360
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install the encoder as the README says
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            # The default Linux wheel bundles CUDA; the CPU wheel is the same PyTorch.
+            python -m pip install torch==2.13.0 --index-url https://download.pytorch.org/whl/cpu
+          fi
+          python -m pip install -e ".[ml,cv,hybrid,dev]" psutil
+          python -c "import torch; print(torch.__version__, torch.get_num_threads())"
+          mkdir -p data/research-local-probability
+          c++ -O3 -std=c++17 -Wall -Wextra -Werror -pthread \
+            scripts/research/local_probability/nnproto_integer.cpp \
+            -o data/research-local-probability/nnproto-integer
+          ls -la data/research-local-probability
+      - name: CPU trainer tests
+        run: python -m pytest -q tests/test_cpu_training.py
+      - name: Recover one LPCB photo from its released file
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "$RELEASE" --repo "$GITHUB_REPOSITORY" --dir release
+          tar -xf "release/lpcb-coded-$RELEASE.tar" -C release "lpcb-coded/$PHOTO.coded"
+          curl -fsSL -o release/md5sums.txt http://qlic.altervista.org/md5sums.txt
+          grep "^$PHOTO.ppm " release/md5sums.txt > release/photo-md5.txt
+          python scripts/research/local_probability/verify_lpcb.py release/lpcb-coded \
+            --md5sums release/photo-md5.txt
+          mkdir -p work
+          python scripts/research/local_probability/compress.py "release/lpcb-coded/$PHOTO.coded" \
+            --decode --out "work/$PHOTO.png"
+          python -c "from PIL import Image; im = Image.open('work/$PHOTO.png'); print(im.size); w, h = im.size; im.crop((w // 2 - 48, h // 2 - 48, w // 2 + 48, h // 2 + 48)).save('work/crop96.png')"
+      - name: Encode and decode a 96x96 crop on the CPU
+        run: |
+          python .github/ci/measure.py work/crop96-measure.json \
+            python scripts/research/local_probability/compress.py work/crop96.png --device cpu \
+            --out work/crop96.coded --receipt work/crop96.json 2>&1 | tail -5
+          python scripts/research/local_probability/compress.py work/crop96.coded \
+            --decode --out work/crop96-decoded.png
+          python -c "import numpy as np; from PIL import Image; a = np.asarray(Image.open('work/crop96.png').convert('RGB')); b = np.asarray(Image.open('work/crop96-decoded.png').convert('RGB')); assert np.array_equal(a, b); import os; print('crop exact', os.path.getsize('work/crop96.coded'), 'bytes')"
+      - name: Encode the photo on the CPU (timed)
+        run: |
+          python .github/ci/measure.py work/photo-measure.json \
+            python scripts/research/local_probability/compress.py "work/$PHOTO.png" --device cpu \
+            --out work/photo.coded --receipt work/photo.json > work/photo-encode.log 2>&1 \
+            || { tail -40 work/photo-encode.log; exit 1; }
+          tail -3 work/photo-encode.log
+          python scripts/research/local_probability/compress.py work/photo.coded \
+            --decode --out work/photo-decoded.png
+          python -c "import numpy as np; from PIL import Image; a = np.asarray(Image.open('work/$PHOTO.png').convert('RGB')); b = np.asarray(Image.open('work/photo-decoded.png').convert('RGB')); assert np.array_equal(a, b); import os; print('photo exact', os.path.getsize('work/photo.coded'), 'bytes')"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: encode-${{ matrix.os }}
+          path: |
+            work/*.json
+            work/*.log
+            work/*.coded
