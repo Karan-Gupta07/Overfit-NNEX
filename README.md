@@ -188,13 +188,18 @@ slower again (the four mixed LPCB photos took 13 to 28 s). See the
 
 ## Run it
 
+You need Python 3.13 (3.12 at least) and a C++17 compiler with 128-bit
+integers: GCC or Clang, or MinGW GCC on Windows (MSVC lacks them). Tested on
+Apple-silicon macOS, x86_64 Linux and x86_64 Windows (in Git Bash).
+
 ```bash
+git clone https://github.com/Karan-Gupta07/Overfit-NNEX
+cd Overfit-NNEX
 python3.13 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[ml,cv,hybrid,dev]"
+source .venv/bin/activate        # Windows, Git Bash: source .venv/Scripts/activate
+pip install -e ".[ml,cv,hybrid]"
 mkdir -p data/research-local-probability
-c++ -O3 -std=c++17 -Wall -Wextra -Werror -pthread \
-  scripts/research/local_probability/nnproto_integer.cpp \
+c++ -O3 -std=c++17 -pthread scripts/research/local_probability/nnproto_integer.cpp \
   -o data/research-local-probability/nnproto-integer
 
 python scripts/research/local_probability/compress.py photo.png \
@@ -203,8 +208,37 @@ python scripts/research/local_probability/compress.py photo.coded \
   --decode --out photo-decoded.png
 ```
 
-PyTorch is needed for training only. `cwebp` supplies the strongest WebP
-floor when installed. Options, formats and limits are in the
+Inputs are 8-bit PNG, PPM, TIFF, BMP, WebP or JPEG files. The encoder trains
+on Apple's GPU (Metal), else an NVIDIA GPU, else the CPU; `--device mps`,
+`cuda` or `cpu` forces one. It uses an NVIDIA GPU only if the installed
+PyTorch was built for CUDA:
+
+- Linux: the default PyTorch install includes CUDA. Without an NVIDIA GPU,
+  `pip install torch==2.13.0 --index-url https://download.pytorch.org/whl/cpu`
+  first skips the large CUDA download.
+- Windows: the default PyTorch runs on the CPU only. For an NVIDIA GPU,
+  install a CUDA build of PyTorch 2.13.0 from pytorch.org first (untested on
+  Windows).
+- AMD GPUs: PyTorch's ROCm build on Linux should work, untested.
+
+Off Metal, encoding is much slower (see [Limits](#limits)). The GPU needs
+about 2 GB for a 512×512 crop and 6 GB for a 10 Mpx LPCB photo; the photo
+also took 6 to 9 GB of RAM, and the largest photos need more.
+
+Decoding needs neither PyTorch nor a GPU: `pip install ".[hybrid]"` and the
+backend above are enough. To check the released LPCB files against LPCB's
+MD5 sums:
+
+```bash
+curl -o md5sums.txt http://qlic.altervista.org/md5sums.txt
+python scripts/research/local_probability/verify_lpcb.py lpcb-coded --md5sums md5sums.txt
+```
+
+with `lpcb-coded/` from the
+[`lpcb-2063b53` release](https://github.com/Karan-Gupta07/Overfit-NNEX/releases/tag/lpcb-2063b53).
+For development, install `.[ml,cv,hybrid,dev]` and build with `-Wall -Wextra
+-Werror`. `cwebp` supplies the strongest WebP floor when installed. Options,
+formats and limits are in the
 [research README](scripts/research/local_probability/README.md) and
 [design 15](docs/design/15-image-local-probability.md).
 
