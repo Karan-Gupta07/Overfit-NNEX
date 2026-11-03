@@ -9,6 +9,7 @@ on:
 
 env:
   RELEASE: lpcb-2063b53
+  ARCHIVE: lpcb-coded-2063b53.tar
   PHOTO: canon_eos_1100d_01
 
 jobs:
@@ -42,8 +43,8 @@ jobs:
         run: |
           gh release download "$RELEASE" --repo "$GITHUB_REPOSITORY" --dir release
           cd release
-          sha256sum -c "lpcb-coded-$RELEASE.tar.sha256"
-          tar -xf "lpcb-coded-$RELEASE.tar"
+          sha256sum -c "$ARCHIVE.sha256"
+          tar -xf "$ARCHIVE"
           (cd lpcb-coded && sha256sum -c SHA256SUMS > /dev/null && echo "107 file checksums ok")
           curl -fsSL -o md5sums.txt http://qlic.altervista.org/md5sums.txt
       - name: Decode all 107 and compare with LPCB's MD5 sums
@@ -94,7 +95,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release download "$RELEASE" --repo "$GITHUB_REPOSITORY" --dir release
-          tar -xf "release/lpcb-coded-$RELEASE.tar" -C release "lpcb-coded/$PHOTO.coded"
+          tar -xf "release/$ARCHIVE" -C release "lpcb-coded/$PHOTO.coded"
           curl -fsSL -o release/md5sums.txt http://qlic.altervista.org/md5sums.txt
           grep "^$PHOTO.ppm " release/md5sums.txt > release/photo-md5.txt
           python scripts/research/local_probability/verify_lpcb.py release/lpcb-coded \
