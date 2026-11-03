@@ -889,7 +889,7 @@ struct Distribution{
     int k,anchor;uint32_t low,mass;uint64_t normal=0;
     std::array<uint32_t,4> weights{},scales{};std::array<int64_t,4> means{};
     static uint32_t sigmoid(int64_t z){
-        if(z>=16*Q)return uint32_t(PROB);if(z<=-16*Q)return 0;
+        if(z>=16*Q){return uint32_t(PROB);}if(z<=-16*Q){return 0;}
         const uint32_t positive=tables().positive[size_t(z<0?-z:z)];
         return z<0?uint32_t(PROB)-positive:positive;
     }
@@ -902,7 +902,7 @@ struct Distribution{
         return uint32_t((sum+normal/2)/normal);
     }
     uint32_t cdf(int v)const{
-        if(v<=0)return 0;if(v>=256)return TOTAL;
+        if(v<=0){return 0;}if(v>=256){return TOTAL;}
         if(!mass)return uint32_t(v)*(TOTAL/256);
         return uint32_t(v)+uint32_t((uint64_t(TOTAL-256)*(raw(v)-low)+mass/2)/mass);
     }
@@ -1221,7 +1221,7 @@ struct NetworkBits{
         :d(dist),r(rotation),rotated(rot),valid(counts){cr=C(r);}
     uint32_t C(int u)const{return u<=0?0u:u>=256?TOTAL:d.cdf(u);}
     uint32_t F(int u)const{
-        if(!rotated)return C(u);if(u<=0)return 0;if(u>=256)return TOTAL;
+        if(!rotated){return C(u);}if(u<=0){return 0;}if(u>=256){return TOTAL;}
         return r+u<=256?C(r+u)-cr:TOTAL-cr+C(r+u-256);
     }
     int V(int t)const{return t<=256?valid[t]:valid[256]+valid[t-256];}

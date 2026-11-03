@@ -379,11 +379,11 @@ struct Coder{
     const Planes& S;int ch;
     Coder(const Planes& planes,int plane):S(planes),ch(plane){}
     int px(int pl,int x,int y)const{
-        if(x<0||y<0||x>=S.w||y>=S.h)return 0;const size_t j=size_t(y)*S.w+x;
-        if(pl==ch||(ch==2&&pl==0))return S.Pc[pl][j];return S.P[pl][j];
+        if(x<0||y<0||x>=S.w||y>=S.h){return 0;}const size_t j=size_t(y)*S.w+x;
+        if(pl==ch||(ch==2&&pl==0)){return S.Pc[pl][j];}return S.P[pl][j];
     }
     int er(int pl,int x,int y)const{
-        if(x<0||y<0||x>=S.w||y>=S.h)return 0;const size_t i=size_t(y)*S.w+x;return int(S.Pc[pl][i])-int(S.mode[pl][i]);
+        if(x<0||y<0||x>=S.w||y>=S.h){return 0;}const size_t i=size_t(y)*S.w+x;return int(S.Pc[pl][i])-int(S.mode[pl][i]);
     }
     // across is the run length of W (see Planes).
     int contexts(int x,int y,int across,uint64_t* b)const{
