@@ -31,6 +31,8 @@ class TorchGroupedTrainer(metal_training.FusedGroupedTrainer):
     # replayed: the step is a few dozen small kernels, and launching them one by
     # one from Python took about ten times as long as running them.
     graphs = True
+    # Rows per chunk of the weight-gradient sums on CUDA (see _outer); 0 sums in one go.
+    split = 256
 
     def __init__(self, nets, dimensions, x, y, a, lr: float, max_norm: float = 10.0):
         super().__init__(nets, dimensions, x, y, a, lr, max_norm, half_scratch=False)
@@ -55,6 +57,24 @@ class TorchGroupedTrainer(metal_training.FusedGroupedTrainer):
         d, h, r = self.d, self.h, 3 * self.k
         g1, g2, g3 = (self._stacked(grads, name) for name in ("w1a", "w2b", "w3b"))
         return g1[:, : d + 1, : h + 1], g2[:, : h + 1, :h], g3[:, : h + 1, :r], bits
+
+    def _outer(self, a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+        """Per plane, a^T b: (g, n, p) and (g, n, q) to (g, p, q), summed over samples."""
+        n = a.shape[1]
+        rows = self.split if self._cuda else 0
+        if not rows or n < 2 * rows:
+            return torch.bmm(a.transpose(1, 2), b)
+        # cuBLAS gives a long sum into a small output only a few thread blocks,
+        # which kept most of an L4 idle; sum chunks of rows side by side instead.
+        chunks, rest = divmod(n, rows)
+        m = chunks * rows
+        g, p, q = a.shape[0], a.shape[2], b.shape[2]
+        aa = a[:, :m].reshape(g * chunks, rows, p)
+        bb = b[:, :m].reshape(g * chunks, rows, q)
+        out = torch.bmm(aa.transpose(1, 2), bb).view(g, chunks, p, q).sum(1)
+        if rest:
+            out += torch.bmm(a[:, m:].transpose(1, 2), b[:, m:])
+        return out
 
     @torch.no_grad()
     def _gradients(self, index: torch.Tensor, params: torch.Tensor):
@@ -104,13 +124,13 @@ class TorchGroupedTrainer(metal_training.FusedGroupedTrainer):
         d_raw = torch.cat((v - w, d_mean, d_log_scale), -1)
         grads = torch.zeros_like(params)
         g1, g2, g3 = (self._stacked(grads, name) for name in ("w1a", "w2b", "w3b"))
-        g3[:, :h] = torch.bmm(z2.transpose(1, 2), d_raw)
+        g3[:, :h] = self._outer(z2, d_raw)
         g3[:, h] = d_raw.sum(1)
         d_z = torch.bmm(d_raw, w3b[:, :h].transpose(1, 2)).mul_(z2 > 0)
-        g2[:, :h] = torch.bmm(z1.transpose(1, 2), d_z)
+        g2[:, :h] = self._outer(z1, d_z)
         g2[:, h] = d_z.sum(1)
         d_z = torch.bmm(d_z, w2b[:, :h].transpose(1, 2)).mul_(z1 > 0)
-        g1[:, :d] = torch.bmm(x.transpose(1, 2), torch.cat((d_z, d_mean.sum(-1, keepdim=True)), -1))
+        g1[:, :d] = self._outer(x, torch.cat((d_z, d_mean.sum(-1, keepdim=True)), -1))
         g1[:, d, :h] = d_z.sum(1)
         return grads, lost
 

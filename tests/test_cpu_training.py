@@ -297,3 +297,39 @@ def test_cuda_graph_steps_match_eager_steps(modules):
         runs.append((fused.params.cpu(), lost))
     assert torch.equal(runs[0][0], runs[1][0])
     assert all(torch.equal(p, q) for p, q in zip(runs[0][1], runs[1][1], strict=True))
+
+
+@pytest.mark.parametrize(("hidden", "mixtures"), [(12, 4), (48, 4)])
+def test_cuda_gradients_match_autograd(modules, hidden, mixtures):
+    import torch
+
+    if not torch.cuda.is_available():
+        pytest.skip("needs a CUDA or ROCm GPU")
+    trainer, _search, cpu = modules
+    nets = [n.cuda() for n in _nets(trainer, hidden, mixtures)]
+    x, y, a = (t.cuda() for t in _data(3000))
+    # 2000 rows: seven chunks of 256 and a remainder.
+    index = torch.randperm(3000)[:2000].to(torch.int32).cuda()
+    fused = _cpu(trainer, cpu, nets, x, y, a)
+    g1, g2, g3, bits = fused.gradients(index)
+    fused.split = 0
+    whole = fused.gradients(index)
+    grouped = trainer.GroupedNet(nets, DIMENSIONS)
+    rows = index.long()
+    reference = trainer.mixture_bits(*grouped(x[:, rows]), y[:, rows], a[:, rows])
+    reference.mean(1).sum().backward()
+    d = max(DIMENSIONS)
+    pairs = [
+        (grouped.w1.grad, g1[:, :d, :hidden]),
+        (grouped.affine.grad[..., 0], g1[:, :d, hidden]),
+        (grouped.b1.grad[:, 0], g1[:, d, :hidden]),
+        (grouped.w2.grad, g2[:, :hidden]),
+        (grouped.b2.grad[:, 0], g2[:, hidden]),
+        (grouped.w3.grad, g3[:, :hidden]),
+        (grouped.b3.grad[:, 0], g3[:, hidden]),
+    ]
+    assert torch.allclose(bits, reference.detach(), rtol=1e-4, atol=1e-4)
+    for want, got in pairs:
+        assert float((want - got).norm() / want.norm()) < 1e-5
+    for split, one in zip((g1, g2, g3), whole[:3], strict=True):
+        assert float((split - one).norm() / one.norm()) < 1e-6
