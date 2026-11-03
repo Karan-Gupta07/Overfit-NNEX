@@ -543,6 +543,7 @@ def test_fast_floor_decodes_exactly(experiment):
     reason="optional learned encoder requires ml and hybrid extras",
 )
 def test_whole_file_selection_with_actual_learned_model(experiment, tmp_path, monkeypatch):
+    # The PyTorch training path (--torch-training); the fused CPU path is tested below.
     compiler = __import__("shutil").which("c++")
     if compiler is None:
         pytest.skip("needs optional research C++ backend")
@@ -565,6 +566,7 @@ def test_whole_file_selection_with_actual_learned_model(experiment, tmp_path, mo
             feature_sets=(0, 1),
             epochs=0,
             device="cpu",
+            fused_training=False,
             conventional=conventional,
             hybrid=False,
         )
@@ -589,6 +591,7 @@ def test_whole_file_selection_with_actual_learned_model(experiment, tmp_path, mo
                 feature_sets=(0, 1),
                 epochs=2,
                 device="cpu",
+                fused_training=False,
                 conventional=False,
                 hybrid=False,
                 parallel=False,
@@ -599,6 +602,7 @@ def test_whole_file_selection_with_actual_learned_model(experiment, tmp_path, mo
                 feature_sets=(0, 1),
                 epochs=2,
                 device="cpu",
+                fused_training=False,
                 conventional=False,
                 hybrid=False,
             )
@@ -610,6 +614,7 @@ def test_whole_file_selection_with_actual_learned_model(experiment, tmp_path, mo
                 feature_sets=(1,),
                 epochs=0,
                 device="cpu",
+                fused_training=False,
                 conventional=False,
                 hybrid=False,
                 envelope=3,
@@ -650,12 +655,52 @@ def test_whole_file_selection_with_actual_learned_model(experiment, tmp_path, mo
         feature_sets=(1,),
         epochs=0,
         device="cpu",
+        fused_training=False,
         conventional=False,
         hybrid=False,
     )
     assert report["learned_in_parallel"]
     assert report["shared_values"] == len(np.unique(g))
     assert np.array_equal(experiment.decompress(blob)[..., :3], sparse)
+
+
+@pytest.mark.skipif(
+    importlib.util.find_spec("torch") is None or importlib.util.find_spec("imagecodecs") is None,
+    reason="optional learned encoder requires ml and hybrid extras",
+)
+def test_cpu_device_trains_with_the_fused_settings(experiment, tmp_path, monkeypatch):
+    compiler = __import__("shutil").which("c++")
+    if compiler is None:
+        pytest.skip("needs optional research C++ backend")
+    binary = tmp_path / "backend"
+    subprocess.run(
+        [compiler, "-O2", "-std=c++17", str(SOURCE / "nnproto_integer.cpp"), "-o", str(binary)],
+        check=True,
+        capture_output=True,
+        timeout=120,
+    )
+    monkeypatch.setattr(experiment.coder, "INTEGER_BINARY", binary)
+    monkeypatch.setattr(experiment.coder, "ROOT", tmp_path)
+    pixels = np.random.default_rng(57).integers(0, 256, (6, 9, 3), np.uint8)
+    path = tmp_path / "source.png"
+    Image.fromarray(pixels).save(path)
+    options = {
+        "widths": (4, 6),
+        "feature_sets": (1,),
+        "epochs": 4,
+        "device": "cpu",
+        "conventional": False,
+        "hybrid": False,
+        "race": False,
+    }
+    blob, report = experiment.compress(path, **options)
+    assert report["fused_training"] and report["weight_search"]
+    assert report["selected"]["format"] == "nnex-v5"
+    assert report["selected"]["batch"] == experiment.SMALL_BATCH
+    assert {c.get("hidden") for c in report["candidates"]} == {4, 6}
+    assert np.array_equal(experiment.decompress(blob)[..., :3], pixels)
+    serial, _ = experiment.compress(path, **options, parallel=False)
+    assert serial == blob
 
 
 def test_uniform_finalist_is_coded_only_when_close(experiment, tmp_path, monkeypatch):

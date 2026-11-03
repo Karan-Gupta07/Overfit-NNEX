@@ -158,7 +158,8 @@ pruning. The three color planes train together in one batched step with
 independent weights (`sequential=True` in `compress()` restores the older
 per-plane loop).
 
-With MPS, a fused Metal trainer runs the steps, then a quantization-aware
+A fused trainer runs the steps (Metal kernels with MPS, otherwise a PyTorch
+copy on the CPU; see [CPU-only encoding](#cpu-only-encoding)), then a quantization-aware
 snapshot on 12-bit grids. An estimated per-plane search picks each tensor's
 grid (one grid, or one per column or row) and codes the searched model
 as a complete file, plus the best uniform-grid model when its estimate is within
@@ -249,6 +250,87 @@ Tecnick run at `2063b53` took a median 10.7 s to encode a 512×512 crop and
 50.8 s for a 2400×2400 image, and 0.17 s and 3.57 s to decode them. These are
 not statistically stable latency benchmarks.
 
+## CPU-only encoding
+
+`--device cpu` encodes without the GPU:
+
+```bash
+python scripts/research/local_probability/compress.py image.png --device cpu \
+  --out data/probe/image.coded --receipt data/probe/image.json
+python scripts/research/local_probability/compress.py data/probe/image.coded \
+  --decode --out data/probe/image-decoded.png
+```
+
+It uses the same settings as a Metal encode: training budget, batch, clip
+norm, input pruning, width race, quantization-aware snapshots and weight
+search. Only the step and the search's batched estimates run in PyTorch
+(`cpu_training.py`) instead of the Metal kernels. The CPU step computes the
+same objective with hand-written gradients. Tests check them against autograd
+and check 20 steps against the Metal trainer. The arithmetic rounds
+differently, so the models are close to Metal's, not identical. `--device auto`
+also takes this path when MPS is unavailable. `--torch-training` still selects
+the older PyTorch path (1,048,576 training pixels, batch 8192, uniform weight
+grids, no race). The files decode with the same backend, without PyTorch.
+`--threads N` caps only the native backend; each width trains on four PyTorch
+threads.
+
+Measured at `878abae` plus this change (Metal files are byte-identical to
+before it) on the M4 Pro used for the benchmarks (12 cores: 8 performance and
+4 efficiency, 24 GB), macOS 27.0.1, PyTorch 2.13.0, on AC power with other
+apps open. Three development crops were measured first. Then the fresh
+Tecnick baloons crop was encoded once, with nothing tuned on it.
+
+| 512×512 crop | CPU file | Metal file | CPU vs Metal | encode, CPU / Metal | width kept, CPU / Metal |
+|---|---:|---:|---:|---:|---:|
+| apples (development) | 88,353 B | 88,438 B | −0.10% | 290 s / 12 s | 12 / 12 |
+| flowers (development) | 89,435 B | 89,288 B | +0.16% | 252 s / 11 s | 12 / 12 |
+| screws (development) | 140,466 B | 140,482 B | −0.01% | 344 s / 24 s | 32 / 32 |
+| baloons (fresh) | 79,329 B | 79,017 B | +0.39% | 247 s / 11.0 s | 12 / 12 |
+
+All four CPU files are complete NNEX v5 files and decoded to exactly the
+source samples. On every crop the race kept the same width as on Metal, and
+the file kept the network alone (no mixing). Encode times are wall time for
+the whole command, including interpreter start and the file check. The
+baloons Metal file is the published `2063b53` result; the other Metal files
+were encoded on the same day as the CPU files.
+
+On baloons, training took 191 s and the quantization-aware snapshot plus
+weight search took 53 s, of a 247 s encode. The CPU file's weights take 2,720
+bytes (2,894 for Metal). It decodes in 0.16 s in-process (median of three;
+0.135 s for the Metal file). Peak memory was 2.0 to 2.1 GB on every crop,
+summed over the encoder's process tree and sampled every 0.2 s. The file is
+27.2% smaller than JPEG XL effort 10 (108,978 bytes; 27.5% for Metal).
+
+The older `--torch-training` path, which `--device cpu` used before this
+change, gave 81,749 bytes on baloons (3.46% over Metal) in 199 s. It kept
+uniform 12-bit weights (5,262 bytes) and a mixed layout that decodes about
+eight times slower. The fused settings take about a quarter longer on the CPU
+and make a 2.96% smaller file.
+
+Limits:
+
+- About 20 times slower to encode than Metal on these crops. Most of the time
+  is the training step, about 3 to 4 ms at batch 4096 and width 12 against
+  about 0.13 ms on Metal. CPU encodes of 2400×2400 images and LPCB photos have
+  not been measured. They train for 51,200 steps at batch 8192 on widths 24
+  and 48, and their inputs take several GB, so expect them to take much longer.
+- Four crops on one Mac, not a stable latency benchmark. Not tested on Linux
+  or x86_64 CPUs.
+- Encoding is not reproducible across machines. Floating-point training can
+  differ between CPUs (Apple and Intel, for example), PyTorch versions and
+  the Metal trainer, which changes the weights, the selected model and the
+  file size. A CPU encode is not expected to reproduce the published Metal
+  files or sizes; on these crops it was within 0.4% of them. How much two
+  CPUs differ has not been measured.
+- Decoding is what must be reproducible: a given file must decode to the
+  same pixels on every supported machine. That has been checked only with
+  ARM64 and x86_64 builds of the decoder on one Mac (x86_64 under Rosetta),
+  not on a separate Intel machine.
+- To check a published size, decode the released file and compare its
+  pixels with the source (`verify_lpcb.py` does this for LPCB files).
+  Re-encoding the source on another machine is a separate measurement and
+  may give a different size.
+- No published benchmark uses CPU encoding.
 ## Individual model and precision experiments
 
 ```bash

@@ -9,6 +9,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import cpu_training
 import imagecodecs
 import metal_training
 import model_search
@@ -757,7 +758,21 @@ def fit_planes(rgb, args, device, tiles, extras=None):
 
 
 def fused_supported(device, dimensions, args):
-    return device == "mps" and metal_training.supported(max(dimensions), args.hidden, args.mixtures)
+    """The fused trainer runs on Metal, and its PyTorch copy (cpu_training) on the CPU."""
+    supported = metal_training.supported(max(dimensions), args.hidden, args.mixtures)
+    return device in ("mps", "cpu") and supported
+
+
+def grouped_trainer(nets, dimensions, x, y, a, lr, max_norm=10.0):
+    if x.device.type == "mps":
+        return metal_training.FusedGroupedTrainer(nets, dimensions, x, y, a, lr, max_norm)
+    return cpu_training.TorchGroupedTrainer(nets, dimensions, x, y, a, lr, max_norm)
+
+
+def evaluator(x, y, a, hidden, mixtures, dimensions):
+    if x.device.type == "mps":
+        return metal_training.FusedEvaluator(x, y, a, hidden, mixtures, dimensions)
+    return cpu_training.TorchEvaluator(x, y, a, hidden, mixtures, dimensions, loss=coded_bits)
 
 
 class Dropped(Exception):
@@ -844,7 +859,7 @@ class Pruner:
                 plane.add(0)
             stride = -(-fused.n // PRUNE_SAMPLES)
             x, y, a = (v[:, ::stride] if stride > 1 else v for v in (fused.x, fused.y, fused.a))
-            self.evaluator = metal_training.FusedEvaluator(x, y, a, h, fused.k, fused.dimensions)
+            self.evaluator = evaluator(x, y, a, h, fused.k, fused.dimensions)
             self.scale = self.pixels / x.shape[1]
         offset = fused.lay["w1a"][0]
         params = fused.params.cpu().numpy()
@@ -916,7 +931,7 @@ def race_score(fused, nets, mean_bits, pixels, absorb=None):
 
 
 def _fit_fused(args, x, y, a, nets, dimensions, planes, prior, count, mark, extras):
-    """fit_planes with the fused Metal step: same objective, different rounding.
+    """fit_planes with the fused step (Metal, or its CPU copy): same objective, different rounding.
 
     With args.search, quantization-aware snapshots continue from the trained
     model (one chain through args.qat_bits) and model_search picks each
@@ -928,9 +943,7 @@ def _fit_fused(args, x, y, a, nets, dimensions, planes, prior, count, mark, extr
     race. With args.estimate, the score also goes to args.estimate, at the
     race's first checkpoint or else at epoch args.estimate_at.
     """
-    fused = metal_training.FusedGroupedTrainer(
-        nets, dimensions, x, y, a, args.lr, getattr(args, "max_norm", 10.0)
-    )
+    fused = grouped_trainer(nets, dimensions, x, y, a, args.lr, getattr(args, "max_norm", 10.0))
     schedule = getattr(args, "schedule", "constant")
     race = getattr(args, "race", None)
     estimate = getattr(args, "estimate", None)

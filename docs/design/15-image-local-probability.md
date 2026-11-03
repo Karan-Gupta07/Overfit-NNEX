@@ -104,8 +104,10 @@ seed 20261023, four CPU threads, and MPS when available.
 On MPS a fused Metal kernel set computes the forward pass, the loss, and the
 backward pass, reduces weight gradients, and applies the clipped Adam step. It
 rounds differently from PyTorch autograd, so it trains different (not
-byte-identical) models. After the float epochs, quantization-aware training
-continues for a tenth of the epochs on 12-bit grids at learning rate 0.002.
+byte-identical) models. Without MPS, `cpu_training.py` runs the same step and
+batched estimates in PyTorch on the CPU, with hand-written gradients, so the
+CPU uses the same settings; it rounds differently again. After the float
+epochs, quantization-aware training continues for a tenth of the epochs on 12-bit grids at learning rate 0.002.
 The weight search below then picks each plane's weights from the float model
 and this snapshot. A further 10-bit snapshot won 8 of 72 development planes
 on estimates, but the files coded smaller without it (0.047% on the crops),

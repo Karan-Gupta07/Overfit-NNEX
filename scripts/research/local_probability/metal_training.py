@@ -954,7 +954,7 @@ class FusedGroupedTrainer:
         self.lay = layout(self.d, self.h, self.k)
         self.size = self.lay["size"][0]
         self.pads = padded(self.d, self.h, self.k)
-        self.lib = library(self.d, self.h, self.k)
+        self.lib = self._compile()
         # Integer features divided by 32 are exact in binary16; only the guide's
         # fractional-part column rounds. Half the memory of float32 inputs.
         self.x = x.to(torch.float16).contiguous()
@@ -982,6 +982,9 @@ class FusedGroupedTrainer:
                 w2b[self.h] = net.hidden[2].bias
                 w3b[: self.h] = net.head.weight.T
                 w3b[self.h] = net.head.bias
+
+    def _compile(self):
+        return library(self.d, self.h, self.k)
 
     def views(self, block):
         out = []

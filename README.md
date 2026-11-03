@@ -212,7 +212,11 @@ floor when installed. Options, formats and limits are in the
   use the SCDX floor.
 - Encoding needs a GPU to be fast (about 11 s per 512×512 crop and about 50 s
   per 2400×2400 image or 10 to 16 Mpx photo on an M4 Pro), and
-  decoding is slower than JPEG XL. Files that mix (NNEX v5) decode several
+  decoding is slower than JPEG XL. `--device cpu` encodes without one with
+  the same settings, but took 247 to 344 s per 512×512 crop, with files
+  within 0.4% of Metal's on four crops
+  ([CPU-only encoding](scripts/research/local_probability/README.md#cpu-only-encoding)).
+  Larger images are untested on CPU. Files that mix (NNEX v5) decode several
   times slower again, and the largest need several GB of memory to decode.
 - Files decode only with the research decoder above (`compress.py --decode`).
 - v4 was tested fresh on 20 studio photos and on LPCB's 107 images (62

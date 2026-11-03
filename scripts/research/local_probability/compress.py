@@ -1118,7 +1118,8 @@ def compress(
     while this process builds the floor. Every worker seeds its own RNGs exactly
     as the serial loop does, so the files are byte-identical either way.
     compile_training=True is faster on MPS but trains (slightly) different models.
-    fused_training=None uses the fused Metal trainer whenever MPS is available;
+    fused_training=None uses the fused trainer (on Metal when MPS is available,
+    else its PyTorch copy on the CPU);
     search=None then adds quantization-aware snapshots and an estimated
     per-plane weight search, coding only two finalists. widths=None picks
     default_widths for the image. Unless race=False, parallel fused
@@ -1179,7 +1180,7 @@ def compress(
         widths = default_widths(area, residual_bytes(rgb) if area > WIDTH_TIERS[-2][0] else None)
     if fused_training is None:
         fused_training = (
-            bool(widths) and device != "cpu" and not compile_training and _mps_available()
+            bool(widths) and not compile_training and (device != "mps" or _mps_available())
         )
     if search is None:
         search = fused_training
