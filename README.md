@@ -321,3 +321,19 @@ win.
 Python 3.12+ with NumPy, Pillow, zstandard and CBOR. Optional: OpenCV (symbol
 analysis in the floor), imagecodecs (JPEG XL), PyTorch (training only). The
 backend needs a C++17 compiler with 128-bit integer support.
+
+## License and commercial use
+
+Required Notice: Copyright 2026 Karan Gupta
+
+The original project software is licensed under the
+[PolyForm Noncommercial License 1.0.0](LICENSE). It permits noncommercial use
+and the other purposes expressly allowed by that license, including use by
+certain educational, research, charitable, and government organizations.
+This is source-available software.
+
+Commercial uses outside those permissions require a separate written commercial
+license. Contact [Karan Gupta](mailto:guptakaranbob@gmail.com) to discuss
+permission, fees, or royalties. Royalties apply only if separately agreed in
+writing. See [licensing details](LICENSING.md) and the [required notice](NOTICE).
+Third-party software and datasets retain their own licenses.

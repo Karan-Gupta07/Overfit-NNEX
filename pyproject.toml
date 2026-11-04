@@ -7,6 +7,8 @@ name = "semanticcodec"
 version = "0.0.1"
 description = "Lossless photo compression with a small network overfitted to each image (NNEX)"
 readme = "README.md"
+license = "PolyForm-Noncommercial-1.0.0"
+license-files = ["LICENSE", "NOTICE"]
 # numpy 2.5's type stubs use 3.12+ syntax, so 3.12 is the real floor.
 requires-python = ">=3.12"
 
